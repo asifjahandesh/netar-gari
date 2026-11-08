@@ -1,0 +1,858 @@
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import {
+  GameState,
+  CameraMode,
+  PaintFinish,
+  PABNA_LANDMARKS,
+} from './game/rules';
+import {
+  PabnaWorldCanvas,
+  HudTelemetry,
+  WorldControlActions,
+} from './components/PabnaWorldCanvas';
+import { soundEngine } from './game/audio';
+
+const CAMERA_MODES: { id: CameraMode; label: string }[] = [
+  { id: 'chase', label: 'Chase Cam' },
+  { id: 'rear-closeup', label: 'Rear Sign (নেতার গাড়ি)' },
+  { id: 'leader-pov', label: 'Leader Sunroof POV' },
+  { id: 'aerial', label: 'Drone Aerial' },
+];
+
+export default function App() {
+  const [gameState, setGameState] = useState<GameState>(() => {
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search);
+      if (params.get('autostart') === '1') {
+        return 'playing';
+      }
+    }
+    return 'title';
+  });
+
+  const [cameraMode, setCameraMode] = useState<CameraMode>('chase');
+  const [paintFinish, setPaintFinish] = useState<PaintFinish>('obsidian-black');
+  const [muted, setMuted] = useState<boolean>(false);
+  const [dockCollapsed, setDockCollapsed] = useState<boolean>(false);
+  const [mobileGamepadVisible, setMobileGamepadVisible] = useState<boolean>(() => {
+    if (typeof window !== 'undefined') {
+      return (
+        'ontouchstart' in window ||
+        navigator.maxTouchPoints > 0 ||
+        window.innerWidth < 1024
+      );
+    }
+    return true;
+  });
+
+  const [telemetry, setTelemetry] = useState<HudTelemetry>({
+    speedKmh: 0,
+    distanceMeters: 0,
+    saluteCount: 0,
+    nearestLandmark: PABNA_LANDMARKS[0],
+    landmarkDistance: 35,
+    visitedCount: 1,
+    sirenActive: false,
+    isReversing: false,
+    playerX: -2,
+    playerZ: 135,
+    playerHeading: 0,
+  });
+
+  const actionsRef = useRef<WorldControlActions | null>(null);
+
+  // Mirror game state to document.body.dataset.state
+  useEffect(() => {
+    document.body.dataset.state = gameState;
+  }, [gameState]);
+
+  const startGame = useCallback(() => {
+    document.body.dataset.state = 'playing';
+    setGameState('playing');
+    if (document.activeElement instanceof HTMLElement) {
+      document.activeElement.blur();
+    }
+    soundEngine.playClick();
+  }, []);
+
+  const cycleCamera = useCallback(() => {
+    setCameraMode((prev) => {
+      const idx = CAMERA_MODES.findIndex((c) => c.id === prev);
+      return CAMERA_MODES[(idx + 1) % CAMERA_MODES.length].id;
+    });
+    soundEngine.playClick();
+  }, []);
+
+  const handleToggleMute = useCallback(() => {
+    const isNowMuted = soundEngine.toggleMute();
+    setMuted(isNowMuted);
+  }, []);
+
+  // Global keyboard bindings for Title -> Start, Pause, Camera, Mute, Dock Collapse
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (gameState === 'title') {
+        if (e.code === 'Enter' || e.code === 'Space') {
+          e.preventDefault();
+          startGame();
+        }
+        return;
+      }
+
+      if (e.code === 'Escape' || e.code === 'KeyP') {
+        e.preventDefault();
+        setGameState((prev) => (prev === 'playing' ? 'paused' : prev === 'paused' ? 'playing' : prev));
+        soundEngine.playClick();
+      } else if (gameState === 'playing') {
+        if (e.code === 'KeyC') {
+          cycleCamera();
+        } else if (e.code === 'KeyM') {
+          handleToggleMute();
+        } else if (e.code === 'KeyV') {
+          setCameraMode((prev) => (prev === 'rear-closeup' ? 'chase' : 'rear-closeup'));
+          soundEngine.playClick();
+        }
+      }
+    };
+
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [gameState, startGame, cycleCamera, handleToggleMute]);
+
+  const currentCameraLabel = CAMERA_MODES.find((c) => c.id === cameraMode)?.label ?? 'Chase Cam';
+
+  return (
+    <main className="relative w-full h-full overflow-hidden select-none">
+      {/* Persistent 60fps Three.js Pabna City Road Viewport */}
+      <PabnaWorldCanvas
+        gameState={gameState}
+        cameraMode={cameraMode}
+        paintFinish={paintFinish}
+        onTelemetryUpdate={setTelemetry}
+        actionsRef={actionsRef}
+      />
+
+      {/* =====================================================================
+          STATE 1: TITLE SCREEN ('title')
+          Asymmetric left-third negative space composition + bespoke SVG emblem
+         ===================================================================== */}
+      {gameState === 'title' && (
+        <div
+          className="fixed inset-0 z-20 flex flex-col justify-between p-6 md:p-12 pointer-events-none"
+          style={{
+            background:
+              'linear-gradient(90deg, rgba(9,13,22,0.94) 0%, rgba(9,13,22,0.78) 42%, rgba(9,13,22,0.15) 75%, rgba(9,13,22,0) 100%)',
+          }}
+        >
+          {/* Left-third Title Lockup & Primary CTA */}
+          <div className="max-w-xl my-auto pointer-events-auto">
+            {/* Bespoke Inline SVG Title Emblem */}
+            <svg
+              viewBox="0 0 540 195"
+              className="w-full max-w-[500px] h-auto mb-5 drop-shadow-[0_8px_20px_rgba(0,0,0,0.9)]"
+              role="img"
+              aria-label="Pabna VIP Convoy: নেতার গাড়ি, ১০০০ গজ দূরে থাকুন"
+            >
+              {/* Protocol Shield Header */}
+              <rect
+                x="4"
+                y="6"
+                width="310"
+                height="32"
+                rx="6"
+                fill="#7f1d1d"
+                stroke="#facc15"
+                strokeWidth="2.5"
+              />
+              <text
+                x="159"
+                y="27"
+                textAnchor="middle"
+                fill="#fde047"
+                fontSize="14"
+                fontWeight="700"
+                fontFamily="Chakra Petch, Hind Siliguri, sans-serif"
+                letterSpacing="1.5"
+              >
+                ★ PABNA ABDUL HAMID ROAD 3D ★
+              </text>
+
+              {/* Main Display Title */}
+              <text
+                x="4"
+                y="86"
+                fill="#ffffff"
+                fontSize="50"
+                fontWeight="700"
+                fontFamily="Hind Siliguri, Plus Jakarta Sans, sans-serif"
+              >
+                পাবনা সিটি কনভয়
+              </text>
+              <text
+                x="4"
+                y="126"
+                fill="#facc15"
+                fontSize="28"
+                fontWeight="700"
+                fontFamily="Chakra Petch, sans-serif"
+                letterSpacing="2"
+              >
+                PABNA VIP PROTOCOL RIDE
+              </text>
+
+              {/* Rear Car Bumper Sign Replica Plaque */}
+              <rect
+                x="4"
+                y="140"
+                width="510"
+                height="48"
+                rx="6"
+                fill="#991b1b"
+                stroke="#facc15"
+                strokeWidth="3"
+              />
+              <text
+                x="259"
+                y="172"
+                textAnchor="middle"
+                fill="#fef08a"
+                fontSize="26"
+                fontWeight="700"
+                fontFamily="Hind Siliguri, sans-serif"
+              >
+                নেতার গাড়ি, ১০০০ গজ দূরে থাকুন
+              </text>
+            </svg>
+
+            <p className="text-slate-200 text-sm md:text-base leading-relaxed mb-6 max-w-lg font-normal">
+              Experience the full 3D visual realism of Pabna City: drive down{' '}
+              <span className="text-amber-300 font-semibold">Abdul Hamid Road</span> past{' '}
+              <span className="text-white font-medium">
+                Pabna Zilla School, Shapla Chattar, Robiul Market, Ananta Cinema Hall, Bus Terminal,
+                Govt. Edward College, and Paksey Bridge Monument
+              </span>{' '}
+              with dedicated touch buttons for mobile and keyboard controls for desktop.
+            </p>
+
+            <div className="flex flex-wrap items-center gap-4">
+              <button
+                type="button"
+                data-start="true"
+                onClick={startGame}
+                className="px-8 py-4 rounded-xl bg-amber-400 hover:bg-amber-300 active:translate-y-0.5 text-slate-950 font-display font-bold text-base md:text-lg tracking-wide shadow-[0_0_30px_rgba(251,191,36,0.5)] transition cursor-pointer whitespace-nowrap shrink-0 flex items-center gap-2"
+              >
+                <span>🚗</span>
+                <span>START VIP RIDE · যাত্রা শুরু করুন</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setCameraMode('rear-closeup');
+                  startGame();
+                }}
+                className="px-5 py-4 rounded-xl bg-red-950/90 hover:bg-red-900 text-amber-200 border-2 border-amber-400/60 font-bengali font-bold text-sm transition cursor-pointer whitespace-nowrap shrink-0 flex items-center gap-2"
+              >
+                <span>🔍</span>
+                <span>নেতার গাড়ি দেখুন (Rear Sign View)</span>
+              </button>
+            </div>
+          </div>
+
+          {/* Control hints footer */}
+          <div className="w-full flex items-center justify-between text-xs md:text-sm text-slate-300 font-display tracking-wide pt-4 border-t border-slate-800/80">
+            <span>
+              Controls: Touch buttons on mobile screen · WASD / Arrows on PC · Space VIP Horn · B Leader Wave · C Camera
+            </span>
+          </div>
+        </div>
+      )}
+
+      {/* =====================================================================
+          STATE 2: PLAYING HUD ('playing')
+         ===================================================================== */}
+      {gameState === 'playing' && (
+        <div className="fixed inset-0 z-10 pointer-events-none flex flex-col justify-between p-3 md:p-5">
+          {/* Top Perimeter Row: Left Landmark & VIP Telemetry | Right Controls & Utility Icon Buttons */}
+          <div className="flex items-start justify-between gap-3">
+            {/* Top-Left Cluster: Active Pabna Landmark & Convoy Respect Readout */}
+            <div
+              className="pointer-events-auto rounded-xl px-4 py-2.5 border border-amber-400/40 shadow-xl"
+              style={{ backgroundColor: 'rgba(15, 23, 42, 0.92)' }}
+            >
+              <div className="flex items-center gap-3">
+                <div>
+                  <div className="text-[10px] md:text-[11px] font-display uppercase tracking-wider text-amber-400 flex items-center gap-1.5">
+                    <span>📍</span>
+                    <span>CURRENT PABNA LOCATION · বর্তমান অবস্থান</span>
+                  </div>
+                  <div className="text-base md:text-xl font-bold font-bengali text-white leading-tight">
+                    {telemetry.nearestLandmark.nameBn}{' '}
+                    <span className="text-xs md:text-sm font-display font-semibold text-slate-300">
+                      · {telemetry.nearestLandmark.nameEn}
+                    </span>
+                  </div>
+                  <div className="text-xs text-slate-300 font-bengali">
+                    {telemetry.nearestLandmark.subtitleBn} ·{' '}
+                    <span className="font-mono tabular-nums text-amber-300">
+                      {telemetry.landmarkDistance}m away
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Tabular Stats Strip */}
+              <div className="mt-2 pt-2 border-t border-slate-700/80 flex items-center gap-4 md:gap-5 text-xs">
+                <div>
+                  <span className="text-slate-400 font-display">DISTANCE </span>
+                  <span className="font-mono tabular-nums font-bold text-white text-sm">
+                    {telemetry.distanceMeters}m
+                  </span>
+                </div>
+                <span aria-hidden="true" className="text-slate-600">
+                  ·
+                </span>
+                <div>
+                  <span className="text-slate-400 font-display">SALUTES </span>
+                  <span className="font-mono tabular-nums font-bold text-amber-300 text-sm">
+                    {telemetry.saluteCount}
+                  </span>
+                </div>
+                <span aria-hidden="true" className="text-slate-600">
+                  ·
+                </span>
+                <div>
+                  <span className="text-slate-400 font-display">LANDMARKS </span>
+                  <span className="font-mono tabular-nums font-bold text-emerald-400 text-sm">
+                    {telemetry.visitedCount}/{PABNA_LANDMARKS.length}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {/* Top-Right Cluster: Rear Bumper Sign View + Mobile Touch Gamepad Toggle + Utility Buttons */}
+            <div className="flex items-center gap-2 pointer-events-auto flex-wrap justify-end">
+              {/* Diegetic Rear Bumper Sign Toggle Button */}
+              <button
+                type="button"
+                tabIndex={-1}
+                onClick={(e) => {
+                  e.currentTarget.blur();
+                  setCameraMode((prev) => (prev === 'rear-closeup' ? 'chase' : 'rear-closeup'));
+                  soundEngine.playClick();
+                }}
+                aria-label="Inspect Rear Car Sign: নেতার গাড়ি, ১০০০ গজ দূরে থাকুন"
+                className={`px-3 py-2 rounded-lg border text-xs font-bengali font-bold transition cursor-pointer whitespace-nowrap shrink-0 shadow-md ${
+                  cameraMode === 'rear-closeup'
+                    ? 'bg-amber-400 text-slate-950 border-white'
+                    : 'bg-red-950/90 text-amber-200 border-amber-400/50 hover:bg-red-900'
+                }`}
+              >
+                নেতার গাড়ি, ১০০০ গজ দূরে থাকুন [V]
+              </button>
+
+              {/* Mobile Gamepad / Touch Buttons Toggle */}
+              <button
+                type="button"
+                tabIndex={-1}
+                onClick={(e) => {
+                  e.currentTarget.blur();
+                  setMobileGamepadVisible((prev) => !prev);
+                  soundEngine.playClick();
+                }}
+                aria-label="Toggle Mobile Touch Controls"
+                className={`h-10 px-3 rounded-lg border text-xs font-display font-semibold flex items-center gap-1.5 cursor-pointer whitespace-nowrap shrink-0 shadow-md transition ${
+                  mobileGamepadVisible
+                    ? 'bg-amber-400 text-slate-950 border-amber-300 font-bold'
+                    : 'bg-slate-900/90 hover:bg-slate-800 text-slate-200 border-slate-700'
+                }`}
+              >
+                <span>📱</span>
+                <span>Touch Pad: {mobileGamepadVisible ? 'ON' : 'OFF'}</span>
+              </button>
+
+              {/* Camera Mode Button */}
+              <button
+                type="button"
+                tabIndex={-1}
+                onClick={(e) => {
+                  e.currentTarget.blur();
+                  cycleCamera();
+                }}
+                aria-label={`Switch Camera View (Current: ${currentCameraLabel})`}
+                className="h-10 px-3 rounded-lg bg-slate-900/90 hover:bg-slate-800 border border-slate-700 text-slate-100 text-xs font-display font-semibold flex items-center gap-1.5 cursor-pointer whitespace-nowrap shrink-0"
+              >
+                <span>📷</span>
+                <span>{currentCameraLabel} [C]</span>
+              </button>
+
+              {/* Mute Button [M] */}
+              <button
+                type="button"
+                tabIndex={-1}
+                onClick={(e) => {
+                  e.currentTarget.blur();
+                  handleToggleMute();
+                }}
+                aria-label={muted ? 'Unmute Audio' : 'Mute Audio'}
+                className="w-10 h-10 rounded-lg bg-slate-900/90 hover:bg-slate-800 border border-slate-700 flex items-center justify-center text-slate-100 cursor-pointer shrink-0"
+              >
+                {muted ? '🔇' : '🔊'}
+              </button>
+
+              {/* Pause Button [P] */}
+              <button
+                type="button"
+                tabIndex={-1}
+                onClick={(e) => {
+                  e.currentTarget.blur();
+                  setGameState('paused');
+                  soundEngine.playClick();
+                }}
+                aria-label="Pause Game"
+                className="w-10 h-10 rounded-lg bg-slate-900/90 hover:bg-slate-800 border border-slate-700 flex items-center justify-center text-slate-100 cursor-pointer shrink-0"
+              >
+                ⏸
+              </button>
+            </div>
+          </div>
+
+          {/* =====================================================================
+              DEDICATED MOBILE TOUCH GAMEPAD HUD (Ergonomic Steering & Pedals)
+             ===================================================================== */}
+          {mobileGamepadVisible && (
+            <div
+              className="w-full flex flex-col justify-end pointer-events-none my-auto pb-4"
+              style={{ touchAction: 'none' }}
+            >
+              {/* Quick Floating Action Row: VIP Horn, Wave, Siren */}
+              <div className="flex items-center justify-end gap-2.5 pointer-events-auto mb-3 pr-2">
+                <button
+                  type="button"
+                  tabIndex={-1}
+                  onTouchStart={(e) => {
+                    e.preventDefault();
+                    actionsRef.current?.triggerHorn();
+                  }}
+                  onMouseDown={(e) => {
+                    e.preventDefault();
+                    actionsRef.current?.triggerHorn();
+                  }}
+                  className="px-4 py-2.5 rounded-full bg-red-700 active:bg-amber-400 active:text-slate-950 text-white font-bengali font-bold text-xs md:text-sm border-2 border-amber-400/80 shadow-[0_4px_16px_rgba(220,38,38,0.6)] active:scale-95 transition flex items-center gap-1.5 cursor-pointer whitespace-nowrap"
+                >
+                  <span>📢</span>
+                  <span>ভিআইপি হর্ন (Space)</span>
+                </button>
+
+                <button
+                  type="button"
+                  tabIndex={-1}
+                  onTouchStart={(e) => {
+                    e.preventDefault();
+                    actionsRef.current?.triggerWave();
+                  }}
+                  onMouseDown={(e) => {
+                    e.preventDefault();
+                    actionsRef.current?.triggerWave();
+                  }}
+                  className="px-4 py-2.5 rounded-full bg-amber-500/90 active:bg-amber-300 text-slate-950 font-bengali font-bold text-xs md:text-sm border-2 border-white shadow-[0_4px_16px_rgba(245,158,11,0.6)] active:scale-95 transition flex items-center gap-1.5 cursor-pointer whitespace-nowrap"
+                >
+                  <span>✋</span>
+                  <span>সালাম (B)</span>
+                </button>
+
+                <button
+                  type="button"
+                  tabIndex={-1}
+                  onTouchStart={(e) => {
+                    e.preventDefault();
+                    actionsRef.current?.toggleSiren();
+                  }}
+                  onMouseDown={(e) => {
+                    e.preventDefault();
+                    actionsRef.current?.toggleSiren();
+                  }}
+                  className={`w-11 h-11 rounded-full border-2 flex items-center justify-center font-bold text-base shadow-lg active:scale-95 transition cursor-pointer ${
+                    telemetry.sirenActive
+                      ? 'bg-blue-600 border-white text-white animate-pulse'
+                      : 'bg-slate-900/90 border-slate-600 text-slate-300'
+                  }`}
+                >
+                  🚨
+                </button>
+              </div>
+
+              {/* Dual-Thumb Driving Controls: Left Steering | Right Gas/Brake/Drift */}
+              <div className="flex items-end justify-between w-full pointer-events-none px-2">
+                {/* Left Thumb: Steer Left & Right */}
+                <div className="pointer-events-auto flex items-center gap-3 bg-slate-950/85 p-2.5 rounded-2xl border border-slate-700/80 shadow-2xl backdrop-blur-md">
+                  <button
+                    type="button"
+                    tabIndex={-1}
+                    onTouchStart={(e) => {
+                      e.preventDefault();
+                      actionsRef.current?.setTouchInput('left', true);
+                    }}
+                    onTouchEnd={(e) => {
+                      e.preventDefault();
+                      actionsRef.current?.setTouchInput('left', false);
+                    }}
+                    onTouchCancel={(e) => {
+                      e.preventDefault();
+                      actionsRef.current?.setTouchInput('left', false);
+                    }}
+                    onMouseDown={() => actionsRef.current?.setTouchInput('left', true)}
+                    onMouseUp={() => actionsRef.current?.setTouchInput('left', false)}
+                    onMouseLeave={() => actionsRef.current?.setTouchInput('left', false)}
+                    className="w-16 h-16 md:w-20 md:h-20 rounded-xl bg-slate-800/95 active:bg-amber-400 active:text-slate-950 text-white font-display font-bold text-2xl flex flex-col items-center justify-center border-2 border-amber-400/60 shadow-[0_0_15px_rgba(251,191,36,0.35)] active:scale-95 transition select-none cursor-pointer"
+                  >
+                    <span>◀</span>
+                    <span className="text-[10px] font-bengali font-semibold mt-0.5">বামে</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    tabIndex={-1}
+                    onTouchStart={(e) => {
+                      e.preventDefault();
+                      actionsRef.current?.setTouchInput('right', true);
+                    }}
+                    onTouchEnd={(e) => {
+                      e.preventDefault();
+                      actionsRef.current?.setTouchInput('right', false);
+                    }}
+                    onTouchCancel={(e) => {
+                      e.preventDefault();
+                      actionsRef.current?.setTouchInput('right', false);
+                    }}
+                    onMouseDown={() => actionsRef.current?.setTouchInput('right', true)}
+                    onMouseUp={() => actionsRef.current?.setTouchInput('right', false)}
+                    onMouseLeave={() => actionsRef.current?.setTouchInput('right', false)}
+                    className="w-16 h-16 md:w-20 md:h-20 rounded-xl bg-slate-800/95 active:bg-amber-400 active:text-slate-950 text-white font-display font-bold text-2xl flex flex-col items-center justify-center border-2 border-amber-400/60 shadow-[0_0_15px_rgba(251,191,36,0.35)] active:scale-95 transition select-none cursor-pointer"
+                  >
+                    <span>▶</span>
+                    <span className="text-[10px] font-bengali font-semibold mt-0.5">ডানে</span>
+                  </button>
+                </div>
+
+                {/* Right Thumb: Gas, Brake/Rev & Drift Pedals */}
+                <div className="pointer-events-auto flex items-end gap-2.5 bg-slate-950/85 p-2.5 rounded-2xl border border-slate-700/80 shadow-2xl backdrop-blur-md">
+                  {/* Drift / Handbrake button */}
+                  <button
+                    type="button"
+                    tabIndex={-1}
+                    onTouchStart={(e) => {
+                      e.preventDefault();
+                      actionsRef.current?.setTouchInput('handbrake', true);
+                    }}
+                    onTouchEnd={(e) => {
+                      e.preventDefault();
+                      actionsRef.current?.setTouchInput('handbrake', false);
+                    }}
+                    onTouchCancel={(e) => {
+                      e.preventDefault();
+                      actionsRef.current?.setTouchInput('handbrake', false);
+                    }}
+                    onMouseDown={() => actionsRef.current?.setTouchInput('handbrake', true)}
+                    onMouseUp={() => actionsRef.current?.setTouchInput('handbrake', false)}
+                    onMouseLeave={() => actionsRef.current?.setTouchInput('handbrake', false)}
+                    className="w-12 h-16 rounded-lg bg-amber-600/90 active:bg-amber-400 active:text-slate-950 text-white font-display font-bold text-xs flex flex-col items-center justify-center border border-amber-400 active:scale-95 transition select-none cursor-pointer"
+                  >
+                    <span>⚡</span>
+                    <span className="text-[9px] mt-0.5 font-bold">DRIFT</span>
+                  </button>
+
+                  {/* Brake / Reverse Pedal */}
+                  <button
+                    type="button"
+                    tabIndex={-1}
+                    onTouchStart={(e) => {
+                      e.preventDefault();
+                      actionsRef.current?.setTouchInput('backward', true);
+                    }}
+                    onTouchEnd={(e) => {
+                      e.preventDefault();
+                      actionsRef.current?.setTouchInput('backward', false);
+                    }}
+                    onTouchCancel={(e) => {
+                      e.preventDefault();
+                      actionsRef.current?.setTouchInput('backward', false);
+                    }}
+                    onMouseDown={() => actionsRef.current?.setTouchInput('backward', true)}
+                    onMouseUp={() => actionsRef.current?.setTouchInput('backward', false)}
+                    onMouseLeave={() => actionsRef.current?.setTouchInput('backward', false)}
+                    className="w-14 h-20 md:w-16 md:h-24 rounded-xl bg-gradient-to-t from-red-950 to-rose-700 active:from-red-600 active:to-red-400 text-white font-display font-bold text-sm flex flex-col items-center justify-center border-2 border-rose-400/80 shadow-[0_0_20px_rgba(244,63,94,0.4)] active:scale-95 transition select-none cursor-pointer"
+                  >
+                    <span className="text-xl">▼</span>
+                    <span className="text-[11px] font-display font-bold tracking-wider mt-1">BRAKE</span>
+                    <span className="text-[9px] font-bengali text-rose-200">ব্রেক</span>
+                  </button>
+
+                  {/* Accelerate / Gas Pedal */}
+                  <button
+                    type="button"
+                    tabIndex={-1}
+                    onTouchStart={(e) => {
+                      e.preventDefault();
+                      actionsRef.current?.setTouchInput('forward', true);
+                    }}
+                    onTouchEnd={(e) => {
+                      e.preventDefault();
+                      actionsRef.current?.setTouchInput('forward', false);
+                    }}
+                    onTouchCancel={(e) => {
+                      e.preventDefault();
+                      actionsRef.current?.setTouchInput('forward', false);
+                    }}
+                    onMouseDown={() => actionsRef.current?.setTouchInput('forward', true)}
+                    onMouseUp={() => actionsRef.current?.setTouchInput('forward', false)}
+                    onMouseLeave={() => actionsRef.current?.setTouchInput('forward', false)}
+                    className="w-16 h-24 md:w-20 md:h-28 rounded-xl bg-gradient-to-t from-emerald-950 to-emerald-600 active:from-emerald-500 active:to-emerald-300 text-white font-display font-bold text-base flex flex-col items-center justify-center border-2 border-emerald-400 shadow-[0_0_25px_rgba(16,185,129,0.55)] active:scale-95 transition select-none cursor-pointer"
+                  >
+                    <span className="text-2xl">▲</span>
+                    <span className="text-xs font-display font-bold tracking-wider mt-1">GAS</span>
+                    <span className="text-[10px] font-bengali text-emerald-200">ত্বরণ</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Unified Collapsible Bottom Control Dock & Landmark Teleporter */}
+          <div className="mx-auto w-full max-w-[1280px] flex flex-col items-center pointer-events-auto">
+            {/* Collapse / Expand Drawer Tab */}
+            <button
+              type="button"
+              tabIndex={-1}
+              onClick={(e) => {
+                e.currentTarget.blur();
+                setDockCollapsed((prev) => !prev);
+              }}
+              className="px-3.5 py-1 rounded-t-lg bg-slate-900/95 border border-b-0 border-slate-700 text-xs font-display text-slate-300 hover:text-white cursor-pointer whitespace-nowrap shadow-lg flex items-center gap-1.5"
+            >
+              <span>{dockCollapsed ? '▴' : '▾'}</span>
+              <span>
+                {dockCollapsed ? 'Show Pabna Landmarks & Teleport Strip' : 'Hide Landmark Dock'}
+              </span>
+            </button>
+
+            {!dockCollapsed && (
+              <div
+                className="w-full rounded-xl px-3.5 py-2.5 border border-slate-700/90 shadow-2xl flex flex-wrap lg:flex-nowrap items-center justify-between gap-3"
+                style={{ backgroundColor: 'rgba(11, 17, 30, 0.95)' }}
+              >
+                {/* Zone 1: Speedometer */}
+                <div className="flex items-center gap-3 pr-3 border-r border-slate-800">
+                  <div className="text-right min-w-[72px]">
+                    <div className="text-2xl md:text-3xl font-display font-bold tabular-nums text-amber-400 leading-none">
+                      {telemetry.speedKmh}
+                    </div>
+                    <div className="text-[10px] font-display uppercase tracking-wider text-slate-400">
+                      KM/H · {telemetry.isReversing ? 'REV' : 'DRIVE'}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Zone 2: Instant Pabna Landmark Jump Strip (All 10 Famous Landmarks) */}
+                <div className="flex items-center gap-1.5 overflow-x-auto py-1 flex-1">
+                  {PABNA_LANDMARKS.map((lm) => {
+                    const isNearest = telemetry.nearestLandmark.id === lm.id;
+                    return (
+                      <button
+                        key={lm.id}
+                        type="button"
+                        tabIndex={-1}
+                        onClick={(e) => {
+                          e.currentTarget.blur();
+                          actionsRef.current?.teleportToLandmark(lm.id);
+                        }}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-bengali font-semibold transition cursor-pointer whitespace-nowrap shrink-0 flex items-center gap-1 ${
+                          isNearest
+                            ? 'bg-amber-400 text-slate-950 font-bold shadow-md'
+                            : 'bg-slate-800/90 hover:bg-slate-700 text-slate-200'
+                        }`}
+                      >
+                        <span>📍</span>
+                        <span>{lm.nameBn}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {/* Zone 3: SUV Paint Finishes */}
+                <div className="flex items-center gap-2 pl-2 border-l border-slate-800">
+                  <span className="text-[11px] font-display text-slate-400 uppercase hidden sm:inline">
+                    Paint:
+                  </span>
+                  <div className="flex items-center gap-1.5">
+                    {(
+                      [
+                        { id: 'obsidian-black', hex: '#0f172a', label: 'Black VIP SUV' },
+                        { id: 'pearl-white', hex: '#f8fafc', label: 'White VIP SUV' },
+                        { id: 'protocol-maroon', hex: '#600d16', label: 'Maroon VIP SUV' },
+                      ] as { id: PaintFinish; hex: string; label: string }[]
+                    ).map((sw) => (
+                      <button
+                        key={sw.id}
+                        type="button"
+                        tabIndex={-1}
+                        aria-label={sw.label}
+                        onClick={(e) => {
+                          e.currentTarget.blur();
+                          setPaintFinish(sw.id);
+                          soundEngine.playClick();
+                        }}
+                        className={`w-6 h-6 rounded-full border-2 cursor-pointer transition ${
+                          paintFinish === sw.id ? 'border-amber-400 scale-110 shadow-lg' : 'border-slate-500'
+                        }`}
+                        style={{ backgroundColor: sw.hex }}
+                      />
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* =====================================================================
+          STATE 3: PAUSE MODAL ('paused')
+         ===================================================================== */}
+      {gameState === 'paused' && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="pause-modal-title"
+          className="fixed inset-0 z-30 flex items-center justify-center p-6"
+          style={{ backgroundColor: 'rgba(9, 13, 22, 0.85)' }}
+        >
+          <div className="w-full max-w-md rounded-2xl bg-slate-900 border border-amber-400/40 p-6 shadow-2xl">
+            <div className="text-xs font-display uppercase tracking-widest text-amber-400 mb-1">
+              VIP PROTOCOL PAUSED · বিরতি
+            </div>
+            <h2 id="pause-modal-title" className="text-2xl font-bold font-bengali text-white mb-4">
+              নেতার গাড়ি · পাবনা সিটি রোড
+            </h2>
+
+            <div className="grid grid-cols-3 gap-3 mb-6 p-3 rounded-xl bg-slate-950 border border-slate-800">
+              <div>
+                <div className="text-[11px] font-display text-slate-400">DISTANCE</div>
+                <div className="text-lg font-mono tabular-nums font-bold text-white">
+                  {telemetry.distanceMeters}m
+                </div>
+              </div>
+              <div>
+                <div className="text-[11px] font-display text-slate-400">SALUTES</div>
+                <div className="text-lg font-mono tabular-nums font-bold text-amber-400">
+                  {telemetry.saluteCount}
+                </div>
+              </div>
+              <div>
+                <div className="text-[11px] font-display text-slate-400">LANDMARKS</div>
+                <div className="text-lg font-mono tabular-nums font-bold text-emerald-400">
+                  {telemetry.visitedCount}/{PABNA_LANDMARKS.length}
+                </div>
+              </div>
+            </div>
+
+            <div className="flex flex-col gap-2.5">
+              <button
+                type="button"
+                onClick={() => setGameState('playing')}
+                className="w-full py-3.5 rounded-xl bg-amber-400 hover:bg-amber-300 text-slate-950 font-display font-bold text-sm cursor-pointer shadow-lg"
+              >
+                RESUME VIP DRIVE (Esc / P)
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  actionsRef.current?.resetCar();
+                  setGameState('playing');
+                }}
+                className="w-full py-3 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-100 font-display font-semibold text-sm cursor-pointer"
+              >
+                RESET TO START (ABDUL HAMID ROAD)
+              </button>
+              <button
+                type="button"
+                onClick={() => setGameState('title')}
+                className="w-full py-3 rounded-xl bg-slate-800/60 hover:bg-slate-800 text-slate-300 font-display font-semibold text-sm cursor-pointer"
+              >
+                RETURN TO TITLE SCREEN
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* =====================================================================
+          STATE 4: SUMMARY MODAL ('gameover')
+         ===================================================================== */}
+      {gameState === 'gameover' && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="summary-modal-title"
+          className="fixed inset-0 z-30 flex items-center justify-center p-6"
+          style={{ backgroundColor: 'rgba(9, 13, 22, 0.88)' }}
+        >
+          <div className="w-full max-w-md rounded-2xl bg-slate-900 border border-amber-400/50 p-6 shadow-2xl">
+            <div className="text-xs font-display uppercase tracking-widest text-emerald-400 mb-1">
+              PABNA CITY CONVOY LOG · আনলিমিটেড রাইড
+            </div>
+            <h2 id="summary-modal-title" className="text-2xl font-bold font-bengali text-white mb-1">
+              নেতার গাড়ি, ১০০০ গজ দূরে থাকুন
+            </h2>
+            <p className="text-xs text-slate-300 mb-5">
+              Full 3D exploration of Pabna City across Abdul Hamid Road, Zilla School, Shapla Chattar,
+              Robiul Market, Ananta Cinema Hall, Edward College, Mental Hospital, and Paksey Bridge.
+            </p>
+
+            <div className="grid grid-cols-3 gap-3 mb-6 p-4 rounded-xl bg-slate-950 border border-slate-800">
+              <div>
+                <div className="text-[11px] font-display text-slate-400">DRIVEN</div>
+                <div className="text-xl font-mono tabular-nums font-bold text-white">
+                  {telemetry.distanceMeters}m
+                </div>
+              </div>
+              <div>
+                <div className="text-[11px] font-display text-slate-400">PUBLIC SALUTES</div>
+                <div className="text-xl font-mono tabular-nums font-bold text-amber-400">
+                  {telemetry.saluteCount}
+                </div>
+              </div>
+              <div>
+                <div className="text-[11px] font-display text-slate-400">VISITED</div>
+                <div className="text-xl font-mono tabular-nums font-bold text-emerald-400">
+                  {telemetry.visitedCount}/{PABNA_LANDMARKS.length}
+                </div>
+              </div>
+            </div>
+
+            <div className="flex flex-col gap-2.5">
+              <button
+                type="button"
+                data-start="true"
+                onClick={() => setGameState('playing')}
+                className="w-full py-3.5 rounded-xl bg-amber-400 hover:bg-amber-300 text-slate-950 font-display font-bold text-sm cursor-pointer shadow-lg"
+              >
+                CONTINUE UNLIMITED RIDE · চালিয়ে যান
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  actionsRef.current?.resetCar();
+                  setGameState('playing');
+                }}
+                className="w-full py-3 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-display font-semibold text-sm cursor-pointer"
+              >
+                NEW TOUR FROM ABDUL HAMID ROAD
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </main>
+  );
+}

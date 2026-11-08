@@ -1,0 +1,6 @@
+{
+  "name": "Pabna VIP Convoy: Abdul Hamid Road 3D",
+  "description": "High-fidelity 3D driving simulation through Pabna City featuring Abdul Hamid Road, Zilla School, Shapla Chattar, Robiul Market, Ananta Cinema Hall, Bus Terminal, Edward College, Mental Hospital, Paksey Hardinge Bridge, realistic Bengali shopfronts, local traffic, dedicated mobile controls, and the iconic political leader's SUV with 'নেতার গাড়ি, ১০০০ গজ দূরে থাকুন'.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
