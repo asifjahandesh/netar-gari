@@ -14,6 +14,9 @@ import {
   speedToKmh,
   createInitialTraffic,
   stepTrafficVehicles,
+  createInitialPedestrians,
+  stepPedestrians,
+  AccidentNotice,
   CarInput,
 } from '../game/rules';
 import {
@@ -26,6 +29,9 @@ import {
   createCngAutoMesh,
   createCycleRickshawMesh,
   createMotorbikeMesh,
+  createBusMesh,
+  createPedestrianMesh,
+  PedestrianMeshRig,
   createLandmarkMesh,
 } from '../game/models';
 import { soundEngine } from '../game/audio';
@@ -42,6 +48,10 @@ export interface HudTelemetry {
   playerX: number;
   playerZ: number;
   playerHeading: number;
+  currency: number;
+  accidentCount: number;
+  chaKhaoyarActive: boolean;
+  lastAccidentNotice: AccidentNotice | null;
 }
 
 export interface WorldControlActions {
@@ -51,6 +61,7 @@ export interface WorldControlActions {
   teleportToLandmark: (landmarkId: string) => void;
   resetCar: () => void;
   setTouchInput: (key: keyof CarInput, active: boolean) => void;
+  dismissChaKhaoyar: () => void;
 }
 
 interface PabnaWorldCanvasProps {
@@ -488,14 +499,16 @@ export const PabnaWorldCanvas: React.FC<PabnaWorldCanvasProps> = ({
     const leaderCar = createLeaderVipSuv(maxAniso);
     scene.add(leaderCar.root);
 
-    // 10. Create Pabna Traffic Vehicles (CNGs, Rickshaws, Motorbikes)
+    // 10. Create Pabna Traffic Vehicles (CNGs, Rickshaws, Motorbikes, Inter-District Buses)
     let trafficState = createInitialTraffic();
     const trafficMeshes: THREE.Group[] = trafficState.map((tv) => {
       let mesh: THREE.Group;
       if (tv.type === 'cng') {
         mesh = createCngAutoMesh(tv.colorHex);
       } else if (tv.type === 'rickshaw') {
-        mesh = createCycleRickshawMesh(tv.colorHex);
+        mesh = createCycleRickshawMesh(tv.colorHex, maxAniso);
+      } else if (tv.type === 'bus') {
+        mesh = createBusMesh(tv.busName || 'পাবনা এক্সপ্রেস', tv.busRoute || 'পাবনা - ঢাকা', tv.colorHex, maxAniso);
       } else {
         mesh = createMotorbikeMesh(tv.colorHex);
       }
@@ -505,8 +518,14 @@ export const PabnaWorldCanvas: React.FC<PabnaWorldCanvasProps> = ({
       return mesh;
     });
 
-    // 11. Player State & Unified Keyboard + Touch Input Hub
+    // 11. Create Pabna Pedestrians walking along sidewalks and zebra crossings
+    let pedestriansState = createInitialPedestrians();
+    const pedestrianRigs: PedestrianMeshRig[] = pedestriansState.map(createPedestrianMesh);
+    pedestrianRigs.forEach((rig) => scene.add(rig.root));
+
+    // 12. Player State & Unified Keyboard + Touch Input Hub
     let playerState: PlayerCarState = createInitialPlayerState();
+    let prevChaKhaoyarActive = false;
     const keysPressed = new Set<string>();
     const touchInput: CarInput = {
       forward: false,
@@ -557,6 +576,11 @@ export const PabnaWorldCanvas: React.FC<PabnaWorldCanvasProps> = ({
       soundEngine.playClick();
     };
 
+    const dismissChaKhaoyar = () => {
+      playerState.chaKhaoyarActive = false;
+      soundEngine.playClick();
+    };
+
     actionsRef.current = {
       triggerHorn: triggerHornAction,
       triggerWave: triggerWaveAction,
@@ -566,6 +590,7 @@ export const PabnaWorldCanvas: React.FC<PabnaWorldCanvasProps> = ({
       setTouchInput: (key, active) => {
         touchInput[key] = active;
       },
+      dismissChaKhaoyar,
     };
 
     const onKeyDown = (e: KeyboardEvent) => {
@@ -702,11 +727,52 @@ export const PabnaWorldCanvas: React.FC<PabnaWorldCanvasProps> = ({
 
         playerState = stepPlayerCar(playerState, activeInput, dt);
 
-        // Step Pabna traffic (CNGs, Rickshaws, Bikes)
+        // Sound trigger on "চা খাওয়ার টাকা" prompt activation
+        if (playerState.chaKhaoyarActive && !prevChaKhaoyarActive) {
+          soundEngine.playChaKhaoSound();
+        }
+        prevChaKhaoyarActive = playerState.chaKhaoyarActive;
+
+        // Step Pabna pedestrians walking on sidewalks and crossing roads (+1,000 Tk per accident)
+        const pedStep = stepPedestrians(pedestriansState, playerState, dt);
+        pedestriansState = pedStep.pedestrians;
+        if (pedStep.accidents.length > 0) {
+          for (const acc of pedStep.accidents) {
+            playerState.currency += acc.reward; // +1,000 Tk
+            playerState.accidentCount += 1;
+            playerState.lastAccidentNotice = {
+              textBn: acc.labelBn,
+              amount: acc.reward,
+              timestamp: Date.now(),
+            };
+            soundEngine.playCrashSound();
+            soundEngine.playCashSound();
+            cameraShakeTrauma = Math.min(1, cameraShakeTrauma + 0.4);
+            spawnPetalBurst(acc.x, 1.4, acc.z, 14);
+          }
+        }
+
+        // Step Pabna traffic (CNGs, Rickshaws, Bikes, Buses: +5,000 to +50,000 Tk per accident)
         const trafficStep = stepTrafficVehicles(trafficState, playerState, elapsed, dt);
         trafficState = trafficStep.vehicles;
         if (trafficStep.newlySaluted > 0) {
           playerState.saluteCount += trafficStep.newlySaluted;
+        }
+        if (trafficStep.accidents.length > 0) {
+          for (const acc of trafficStep.accidents) {
+            playerState.currency += acc.reward; // +5,000 to +50,000 Tk based on vehicle size!
+            playerState.accidentCount += 1;
+            playerState.lastAccidentNotice = {
+              textBn: acc.labelBn,
+              amount: acc.reward,
+              timestamp: Date.now(),
+            };
+            soundEngine.playCrashSound();
+            soundEngine.playCashSound();
+            cameraShakeTrauma = Math.min(1, cameraShakeTrauma + 0.65);
+            playerState.speed *= 0.65;
+            spawnPetalBurst(acc.x, 1.8, acc.z, 22);
+          }
         }
       }
 
@@ -753,6 +819,27 @@ export const PabnaWorldCanvas: React.FC<PabnaWorldCanvasProps> = ({
         const mesh = trafficMeshes[i];
         mesh.position.set(tv.x, 0, tv.z);
         mesh.rotation.y = tv.heading;
+      }
+
+      // Update Pedestrian Meshes & Walking Cycles
+      for (let i = 0; i < pedestriansState.length; i++) {
+        const p = pedestriansState[i];
+        const rig = pedestrianRigs[i];
+        rig.root.position.set(p.x, 0, p.z);
+        rig.root.rotation.y = p.heading;
+        if (p.isFallen) {
+          rig.root.rotation.z = Math.PI / 2; // fallen sideways on road from impact
+          rig.leftLeg.rotation.x = 0.25;
+          rig.rightLeg.rotation.x = -0.25;
+        } else {
+          rig.root.rotation.z = 0;
+          const walkPhase = elapsed * p.speed * 6.5 + p.id;
+          const legSwing = Math.sin(walkPhase) * 0.45;
+          rig.leftLeg.rotation.x = legSwing;
+          rig.rightLeg.rotation.x = -legSwing;
+          rig.leftArm.rotation.x = -legSwing * 0.75;
+          rig.rightArm.rotation.x = legSwing * 0.75;
+        }
       }
 
       // Update Pooled Celebration Flower Petals
@@ -905,6 +992,10 @@ export const PabnaWorldCanvas: React.FC<PabnaWorldCanvasProps> = ({
           playerX: Math.round(playerState.x),
           playerZ: Math.round(playerState.z),
           playerHeading: playerState.heading,
+          currency: playerState.currency,
+          accidentCount: playerState.accidentCount,
+          chaKhaoyarActive: playerState.chaKhaoyarActive,
+          lastAccidentNotice: playerState.lastAccidentNotice,
         });
       }
 

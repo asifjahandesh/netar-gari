@@ -224,7 +224,7 @@ export interface PlayerCarState {
   lastAccidentNotice: AccidentNotice | null;
 }
 
-export type TrafficType = 'cng' | 'rickshaw' | 'bike';
+export type TrafficType = 'cng' | 'rickshaw' | 'bike' | 'bus';
 
 export interface TrafficVehicle {
   id: number;
@@ -241,6 +241,8 @@ export interface TrafficVehicle {
   hitCooldown: number;
   phaseOffset: number;
   colorHex: number;
+  busName?: string;
+  busRoute?: string;
 }
 
 export type PedestrianType = 'student' | 'lungi-man' | 'office-worker';
@@ -500,6 +502,7 @@ export function createInitialTraffic(): TrafficVehicle[] {
       targetLaneOffset: lane,
       roadSegment: northbound ? 'main-north' : 'main-south',
       scaredTimer: 0,
+      hitCooldown: 0,
       phaseOffset: i * 0.7,
       colorHex: cngColors[i % cngColors.length],
     });
@@ -522,6 +525,7 @@ export function createInitialTraffic(): TrafficVehicle[] {
       targetLaneOffset: lane,
       roadSegment: northbound ? 'main-north' : 'main-south',
       scaredTimer: 0,
+      hitCooldown: 0,
       phaseOffset: i * 1.1,
       colorHex: rickshawColors[i % rickshawColors.length],
     });
@@ -544,8 +548,36 @@ export function createInitialTraffic(): TrafficVehicle[] {
       targetLaneOffset: lane,
       roadSegment: northbound ? 'main-north' : 'main-south',
       scaredTimer: 0,
+      hitCooldown: 0,
       phaseOffset: i * 0.9,
       colorHex: bikeColors[i % bikeColors.length],
+    });
+  }
+
+  // 3 Inter-District Heavy Coach Buses (50,000 Tk accident reward)
+  const busConfigs = [
+    { name: 'পাবনা এক্সপ্রেস', route: 'পাবনা - ঢাকা', colorHex: 0xdc2626, z: 80, lane: 4.2, northbound: false },
+    { name: 'শ্যামলী স্পেশাল', route: 'পাবনা - চট্টগ্রাম', colorHex: 0x16a34a, z: -40, lane: -4.2, northbound: true },
+    { name: 'সি-লাইন ট্রাভেলস', route: 'পাবনা - রাজশাহী', colorHex: 0x2563eb, z: -150, lane: 4.2, northbound: false },
+  ];
+  for (const b of busConfigs) {
+    vehicles.push({
+      id: id++,
+      type: 'bus',
+      x: b.lane,
+      z: b.z,
+      heading: b.northbound ? 0 : Math.PI,
+      speed: 9.5,
+      baseSpeed: 9.5,
+      laneOffset: b.lane,
+      targetLaneOffset: b.lane,
+      roadSegment: b.northbound ? 'main-north' : 'main-south',
+      scaredTimer: 0,
+      hitCooldown: 0,
+      phaseOffset: 0.4,
+      colorHex: b.colorHex,
+      busName: b.name,
+      busRoute: b.route,
     });
   }
 
@@ -553,23 +585,132 @@ export function createInitialTraffic(): TrafficVehicle[] {
 }
 
 /**
- * Updates traffic vehicles with 3 distinct behavior policies:
- * 1. CNG ('cng'): Periodic lane-weaving between inner and outer lane
- * 2. Rickshaw ('rickshaw'): Steady outer-lane pedaling with gentle sinusoidal sway
- * 3. Bike ('bike'): Fast overtaker that weaves rapidly and yields sharply when VIP approaches
- * Plus VIP Horn ("নেতার গাড়ি, ১০০০ গজ দূরে থাকুন") scatter reaction!
+ * Creates pedestrians walking on sidewalks and crossing roads
+ */
+export function createInitialPedestrians(): Pedestrian[] {
+  const peds: Pedestrian[] = [];
+  const studentColors = [0x1e3a8a, 0x0284c7, 0xf8fafc];
+  const lungiColors = [0x047857, 0x0369a1, 0x7c2d12, 0x4338ca];
+  const officeColors = [0x1e293b, 0x334155, 0x475569];
+
+  let id = 1;
+  for (let i = 0; i < 18; i++) {
+    const isCrossing = i % 3 === 0;
+    const type: PedestrianType = i % 3 === 0 ? 'student' : i % 3 === 1 ? 'lungi-man' : 'office-worker';
+    const side = i % 2 === 0 ? -1 : 1;
+    const x = isCrossing ? side * 5.5 : side * 10.4;
+    const z = 145 - i * 26;
+    const colors = type === 'student' ? studentColors : type === 'lungi-man' ? lungiColors : officeColors;
+
+    peds.push({
+      id: id++,
+      type,
+      x,
+      z,
+      targetX: isCrossing ? -x : x,
+      heading: isCrossing ? (side < 0 ? Math.PI / 2 : -Math.PI / 2) : (side < 0 ? 0 : Math.PI),
+      speed: 1.1 + (i % 3) * 0.4,
+      isFallen: false,
+      tumbleTimer: 0,
+      hitCooldown: 0,
+      colorHex: colors[i % colors.length],
+    });
+  }
+  return peds;
+}
+
+export interface PedestrianStepResult {
+  pedestrians: Pedestrian[];
+  accidents: AccidentEvent[];
+}
+
+/**
+ * Steps pedestrian walking and handles accidents (+1,000 Tk per pedestrian accident)
+ */
+export function stepPedestrians(
+  pedestrians: Pedestrian[],
+  player: PlayerCarState,
+  rawDt: number
+): PedestrianStepResult {
+  const dt = Math.min(Math.max(rawDt, 0), 0.05);
+  const accidents: AccidentEvent[] = [];
+
+  const updated = pedestrians.map((p) => {
+    let { x, z, heading, speed, isFallen, tumbleTimer, hitCooldown, targetX } = p;
+    hitCooldown = Math.max(0, hitCooldown - dt);
+
+    if (isFallen) {
+      tumbleTimer = Math.max(0, tumbleTimer - dt);
+      if (tumbleTimer <= 0) {
+        isFallen = false;
+      }
+      return { ...p, isFallen, tumbleTimer, hitCooldown };
+    }
+
+    // Check collision with player car
+    const dx = x - player.x;
+    const dz = z - player.z;
+    const distToPlayer = Math.hypot(dx, dz);
+
+    if (distToPlayer < 2.4 && hitCooldown <= 0) {
+      // Pedestrian accident! User rule: +1,000 Tk per person
+      isFallen = true;
+      tumbleTimer = 4.0;
+      hitCooldown = 5.0;
+      x += (dx >= 0 ? 1 : -1) * 3.6; // knock aside
+      accidents.push({
+        type: 'pedestrian',
+        reward: 1000,
+        labelBn: 'পথচারী দুর্ঘটনা! (+১,০০০ ৳)',
+        x,
+        z,
+      });
+    } else {
+      // Normal walking
+      if (Math.abs(x - targetX) > 0.4) {
+        const dir = Math.sign(targetX - x);
+        x += dir * speed * dt;
+      } else {
+        targetX = -targetX; // turn around
+      }
+    }
+
+    // Wrap along corridor
+    if (z < -290) z += 540;
+    if (z > 250) z -= 540;
+
+    return {
+      ...p,
+      x,
+      z,
+      targetX,
+      heading,
+      speed,
+      isFallen,
+      tumbleTimer,
+      hitCooldown,
+    };
+  });
+
+  return { pedestrians: updated, accidents };
+}
+
+/**
+ * Updates traffic vehicles with accident detection (+5,000 to +50,000 Tk based on vehicle size)
  */
 export function stepTrafficVehicles(
   vehicles: TrafficVehicle[],
   player: PlayerCarState,
   elapsedTime: number,
   rawDt: number
-): { vehicles: TrafficVehicle[]; newlySaluted: number } {
+): { vehicles: TrafficVehicle[]; newlySaluted: number; accidents: AccidentEvent[] } {
   const dt = Math.min(Math.max(rawDt, 0), 0.05);
   let newlySaluted = 0;
+  const accidents: AccidentEvent[] = [];
 
   const updated = vehicles.map((v) => {
-    let { x, z, heading, speed, baseSpeed, laneOffset, targetLaneOffset, scaredTimer } = v;
+    let { x, z, heading, speed, baseSpeed, laneOffset, targetLaneOffset, scaredTimer, hitCooldown } = v;
+    hitCooldown = Math.max(0, hitCooldown - dt);
     const northbound = v.roadSegment === 'main-north';
     const dirSign = northbound ? -1 : 1; // northbound moves toward -Z
 
@@ -578,7 +719,38 @@ export function stepTrafficVehicles(
     const dz = z - player.z;
     const distToPlayer = Math.hypot(dx, dz);
 
-    // Trigger scatter if player honks VIP horn or has siren on nearby, or drives closely behind
+    // Collision / Accident check with player SUV
+    // User rule: "Accident with vehicles will increase from 5000 to 50000 tk (based on vehicle size)"
+    const hitThreshold = v.type === 'bus' ? 4.9 : 2.9;
+    if (distToPlayer < hitThreshold && hitCooldown <= 0) {
+      hitCooldown = 3.8;
+      scaredTimer = 4.0;
+      const pushDir = dx >= 0 ? 1 : -1;
+      x += pushDir * (v.type === 'bus' ? 2.5 : 4.2); // knock vehicle away from player
+
+      let reward = 8000;
+      let label = 'বাইক দুর্ঘটনা! (+৮,০০০ ৳)';
+      if (v.type === 'cng') {
+        reward = 25000;
+        label = 'সিএনজি দুর্ঘটনা! (+২৫,০০০ ৳)';
+      } else if (v.type === 'rickshaw') {
+        reward = 15000;
+        label = 'রিকশা দুর্ঘটনা! (+১৫,০০০ ৳)';
+      } else if (v.type === 'bus') {
+        reward = 50000;
+        label = 'আন্তঃজেলা বাস দুর্ঘটনা! (+৫০,০০০ ৳)';
+      }
+
+      accidents.push({
+        type: v.type,
+        reward,
+        labelBn: label,
+        x,
+        z,
+      });
+    }
+
+    // Trigger scatter if player honks VIP horn or has siren on nearby
     const hornRadius = player.hornTimer > 0 ? 45 : player.sirenActive ? 32 : 14;
     if (distToPlayer < hornRadius) {
       if (scaredTimer <= 0.1 && (player.hornTimer > 0 || player.sirenActive)) {
@@ -589,24 +761,22 @@ export function stepTrafficVehicles(
 
     if (scaredTimer > 0) {
       scaredTimer = Math.max(0, scaredTimer - dt);
-      // Scatter toward roadside shoulder ("১০০০ গজ দূরে থাকুন" effect!)
       const shoulderX = x <= 0 ? -7.6 : 7.6;
       targetLaneOffset = shoulderX;
       speed = baseSpeed * 0.65;
     } else {
       speed = baseSpeed;
-      // Distinct archetype behavior policies:
       if (v.type === 'cng') {
-        // Policy 1: Lane weaver every few seconds
         const weaveWave = Math.sin(elapsedTime * 0.8 + v.phaseOffset);
         const baseLane = northbound ? -3.4 : 3.4;
         targetLaneOffset = baseLane + (weaveWave > 0.4 ? -1.2 : weaveWave < -0.4 ? 0.9 : 0);
       } else if (v.type === 'rickshaw') {
-        // Policy 2: Roadside steady cruiser with subtle pedal sway
         const baseLane = northbound ? -5.8 : 5.8;
         targetLaneOffset = baseLane + Math.sin(elapsedTime * 2.4 + v.phaseOffset) * 0.28;
+      } else if (v.type === 'bus') {
+        const baseLane = northbound ? -4.2 : 4.2;
+        targetLaneOffset = baseLane;
       } else {
-        // Policy 3: Fast motorbike overtaker
         const baseLane = northbound ? -2.0 : 2.0;
         targetLaneOffset = baseLane + Math.sin(elapsedTime * 1.7 + v.phaseOffset) * 1.45;
         speed = baseSpeed * (1 + 0.15 * Math.sin(elapsedTime * 1.2 + v.phaseOffset));
@@ -618,12 +788,6 @@ export function stepTrafficVehicles(
     const prevX = x;
     x = x + (targetLaneOffset - x) * lateralLerp;
     laneOffset = x;
-
-    // Gentle soft collision avoidance if right in front of player car
-    if (distToPlayer < 4.8) {
-      const pushX = dx === 0 ? (northbound ? -1 : 1) : Math.sign(dx);
-      x += pushX * 8 * dt;
-    }
 
     // Advance along Z
     z += dirSign * speed * dt;
@@ -645,8 +809,9 @@ export function stepTrafficVehicles(
       laneOffset,
       targetLaneOffset,
       scaredTimer,
+      hitCooldown,
     };
   });
 
-  return { vehicles: updated, newlySaluted };
+  return { vehicles: updated, newlySaluted, accidents };
 }

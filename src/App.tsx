@@ -57,6 +57,10 @@ export default function App() {
     playerX: -2,
     playerZ: 135,
     playerHeading: 0,
+    currency: 0,
+    accidentCount: 0,
+    chaKhaoyarActive: false,
+    lastAccidentNotice: null,
   });
 
   const actionsRef = useRef<WorldControlActions | null>(null);
@@ -273,11 +277,11 @@ export default function App() {
          ===================================================================== */}
       {gameState === 'playing' && (
         <div className="fixed inset-0 z-10 pointer-events-none flex flex-col justify-between p-3 md:p-5">
-          {/* Top Perimeter Row: Left Landmark & VIP Telemetry | Right Controls & Utility Icon Buttons */}
-          <div className="flex items-start justify-between gap-3">
+          {/* Top Perimeter Row: Left Landmark & VIP Telemetry | Center Currency | Right Controls & Utility Icon Buttons */}
+          <div className="flex items-start justify-between gap-3 flex-wrap md:flex-nowrap">
             {/* Top-Left Cluster: Active Pabna Landmark & Convoy Respect Readout */}
             <div
-              className="pointer-events-auto rounded-xl px-4 py-2.5 border border-amber-400/40 shadow-xl"
+              className="pointer-events-auto rounded-xl px-4 py-2.5 border border-amber-400/40 shadow-xl shrink-0"
               style={{ backgroundColor: 'rgba(15, 23, 42, 0.92)' }}
             >
               <div className="flex items-center gap-3">
@@ -326,6 +330,29 @@ export default function App() {
                   <span className="font-mono tabular-nums font-bold text-emerald-400 text-sm">
                     {telemetry.visitedCount}/{PABNA_LANDMARKS.length}
                   </span>
+                </div>
+              </div>
+            </div>
+
+            {/* Center: Active BDT Currency & Accident Counter */}
+            <div
+              className="pointer-events-auto rounded-xl px-4 py-2 border-2 border-emerald-400/80 shadow-2xl flex items-center gap-3 mx-auto shrink-0"
+              style={{
+                background: 'linear-gradient(135deg, rgba(6, 78, 59, 0.95) 0%, rgba(15, 23, 42, 0.95) 100%)',
+              }}
+            >
+              <div className="w-10 h-10 rounded-full bg-emerald-500/20 border border-emerald-400 flex items-center justify-center text-xl font-bold text-emerald-300 shadow-inner">
+                ৳
+              </div>
+              <div>
+                <div className="text-[10px] md:text-[11px] font-display uppercase tracking-widest text-emerald-300 font-bold">
+                  ACTIVE BDT CURRENCY · ব্যালেন্স
+                </div>
+                <div className="text-xl md:text-2xl font-bold font-mono text-emerald-300 tabular-nums leading-none">
+                  ৳ {telemetry.currency.toLocaleString()}
+                </div>
+                <div className="text-[10px] font-bengali text-slate-300 mt-0.5">
+                  মোট দুর্ঘটনা: <span className="text-amber-300 font-bold">{telemetry.accidentCount}</span>
                 </div>
               </div>
             </div>
@@ -416,6 +443,26 @@ export default function App() {
               </button>
             </div>
           </div>
+
+          {/* Floating Accident & Reward Notice Toast */}
+          {telemetry.lastAccidentNotice && (
+            <div
+              key={telemetry.lastAccidentNotice.timestamp}
+              className="mx-auto pointer-events-auto mt-2 px-6 py-2.5 rounded-full border-2 shadow-[0_0_25px_rgba(234,179,8,0.6)] animate-bounce flex items-center gap-2.5 backdrop-blur-md"
+              style={{
+                backgroundColor:
+                  telemetry.lastAccidentNotice.amount >= 0 ? 'rgba(6, 78, 59, 0.95)' : 'rgba(153, 27, 27, 0.95)',
+                borderColor: telemetry.lastAccidentNotice.amount >= 0 ? '#34d399' : '#f87171',
+              }}
+            >
+              <span className="text-xl">
+                {telemetry.lastAccidentNotice.amount >= 0 ? '💥💰' : '☕💸'}
+              </span>
+              <span className="font-bengali font-bold text-sm md:text-base text-white">
+                {telemetry.lastAccidentNotice.textBn}
+              </span>
+            </div>
+          )}
 
           {/* =====================================================================
               DEDICATED MOBILE TOUCH GAMEPAD HUD (Ergonomic Steering & Pedals)
@@ -717,6 +764,52 @@ export default function App() {
       )}
 
       {/* =====================================================================
+          STREET EVENT DIALOG: "ভাই চা খাওয়ার টাকা টা যদি......."
+         ===================================================================== */}
+      {telemetry.chaKhaoyarActive && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          className="fixed inset-0 z-40 flex items-center justify-center p-4"
+          style={{ backgroundColor: 'rgba(9, 13, 22, 0.78)' }}
+        >
+          <div className="w-full max-w-md rounded-2xl bg-gradient-to-b from-amber-950 via-slate-900 to-slate-950 border-2 border-amber-400 p-6 shadow-[0_0_50px_rgba(245,158,11,0.5)] text-center animate-in fade-in zoom-in duration-200">
+            <div className="w-16 h-16 mx-auto mb-3 rounded-full bg-amber-500/20 border-2 border-amber-400 flex items-center justify-center text-3xl shadow-inner">
+              ☕
+            </div>
+
+            <div className="text-xs font-display uppercase tracking-widest text-amber-300 mb-1 font-bold">
+              পাবনা শহরের চা আড্ডা · STREET PETITION
+            </div>
+
+            <h2 className="text-2xl md:text-3xl font-bold font-bengali text-white mb-2 leading-tight">
+              “ভাই চা খাওয়ার টাকা টা যদি.......”
+            </h2>
+
+            <p className="text-sm font-bengali text-amber-200 mb-4 leading-relaxed">
+              পাবনা শহরের একদল মানুষ এসে নেতার গাড়ি ঘিরে ধরে বিনীতভাবে চা খাওয়ার টাকা চেয়েছে!
+            </p>
+
+            <div className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-red-950/80 border border-red-500/60 text-red-200 text-sm font-bengali font-bold mb-6">
+              <span>💸</span>
+              <span>-১,০০০ টাকা কেটে নেওয়া হয়েছে! (চা ও বিস্কুট খরচ)</span>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => {
+                actionsRef.current?.dismissChaKhaoyar();
+              }}
+              className="w-full py-3.5 rounded-xl bg-gradient-to-r from-amber-400 to-amber-500 hover:from-amber-300 hover:to-amber-400 text-slate-950 font-bengali font-bold text-base shadow-[0_0_25px_rgba(251,191,36,0.5)] active:scale-95 transition cursor-pointer flex items-center justify-center gap-2"
+            >
+              <span>☕</span>
+              <span>আচ্ছা নেন (দিলাম ১,০০০ টাকা)</span>
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* =====================================================================
           STATE 3: PAUSE MODAL ('paused')
          ===================================================================== */}
       {gameState === 'paused' && (
@@ -734,6 +827,21 @@ export default function App() {
             <h2 id="pause-modal-title" className="text-2xl font-bold font-bengali text-white mb-4">
               নেতার গাড়ি · পাবনা সিটি রোড
             </h2>
+
+            <div className="grid grid-cols-2 gap-3 mb-4 p-3 rounded-xl bg-emerald-950/60 border border-emerald-500/40">
+              <div>
+                <div className="text-[11px] font-display text-emerald-300">TOTAL BDT · ব্যালেন্স</div>
+                <div className="text-xl font-mono tabular-nums font-bold text-emerald-300">
+                  ৳ {telemetry.currency.toLocaleString()}
+                </div>
+              </div>
+              <div>
+                <div className="text-[11px] font-display text-emerald-300">ACCIDENTS · দুর্ঘটনা</div>
+                <div className="text-xl font-mono tabular-nums font-bold text-amber-300">
+                  {telemetry.accidentCount}
+                </div>
+              </div>
+            </div>
 
             <div className="grid grid-cols-3 gap-3 mb-6 p-3 rounded-xl bg-slate-950 border border-slate-800">
               <div>
@@ -808,6 +916,21 @@ export default function App() {
               Full 3D exploration of Pabna City across Abdul Hamid Road, Zilla School, Shapla Chattar,
               Robiul Market, Ananta Cinema Hall, Edward College, Mental Hospital, and Paksey Bridge.
             </p>
+
+            <div className="grid grid-cols-2 gap-3 mb-4 p-3 rounded-xl bg-emerald-950/60 border border-emerald-500/40">
+              <div>
+                <div className="text-[11px] font-display text-emerald-300">TOTAL BDT · সংগৃহীত টাকা</div>
+                <div className="text-xl font-mono tabular-nums font-bold text-emerald-300">
+                  ৳ {telemetry.currency.toLocaleString()}
+                </div>
+              </div>
+              <div>
+                <div className="text-[11px] font-display text-emerald-300">ACCIDENTS · মোট দুর্ঘটনা</div>
+                <div className="text-xl font-mono tabular-nums font-bold text-amber-300">
+                  {telemetry.accidentCount}
+                </div>
+              </div>
+            </div>
 
             <div className="grid grid-cols-3 gap-3 mb-6 p-4 rounded-xl bg-slate-950 border border-slate-800">
               <div>
