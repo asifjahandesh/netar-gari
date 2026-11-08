@@ -139,17 +139,29 @@ test('Random "চা খাওয়ার টাকা" prompt deducts 1,000 Tk fr
   assert.equal(player.chaKhaoyarActive, true, 'Cha khaoyar event should become active');
   assert.equal(player.currency, 4000, 'Currency should be deducted by exactly 1,000 Tk');
   assert.equal(player.chaKhaoyarDeductCount, 1, 'Deduct count should increment');
-  assert.ok(player.lastAccidentNotice?.textBn.includes('চা খাওয়ার টাকা'), 'Notice should record tea event');
+  assert.ok(player.lastAccidentNotice?.textBn.includes('চা খাওয়ার'), 'Notice should record tea event in Pabna dialect');
 });
 
 test('findNearestLandmark returns closest Pabna landmark accurately', () => {
-  const { landmark, distance } = findNearestLandmark(-22, 18);
+  const { landmark, distance } = findNearestLandmark(-24, 110);
   assert.equal(landmark.id, 'zilla-school');
   assert.ok(distance < 5);
 
-  const { landmark: collegeLm } = findNearestLandmark(-95, -50);
+  const { landmark: collegeLm } = findNearestLandmark(-100, -50);
   assert.equal(collegeLm.id, 'edward-college');
 
-  const { landmark: bridgeLm } = findNearestLandmark(95, 75);
+  const { landmark: bridgeLm } = findNearestLandmark(100, 75);
   assert.equal(bridgeLm.id, 'hardinge-bridge');
+});
+
+test('Driving on wrong side awards 2x income for accidents', () => {
+  const pedestrians = createInitialPedestrians();
+  const player = createInitialPlayerState();
+  player.isWrongSide = true; // Driving on wrong side
+  player.x = pedestrians[0].x;
+  player.z = pedestrians[0].z;
+
+  const result = stepPedestrians(pedestrians, player, 0.04);
+  assert.equal(result.accidents.length, 1);
+  assert.equal(result.accidents[0].reward, 2000, 'Wrong side accident should grant double reward (+2,000 Tk)');
 });

@@ -4,6 +4,12 @@ import {
   CameraMode,
   PaintFinish,
   PABNA_LANDMARKS,
+  getSavedLeaderName,
+  saveLeaderName,
+  getStoredAccountCurrency,
+  saveStoredAccountCurrency,
+  calculateCorruptionAchievement,
+  BANGLADESH_CORRUPTION_SCAMS,
 } from './game/rules';
 import {
   PabnaWorldCanvas,
@@ -27,9 +33,11 @@ export default function App() {
         return 'playing';
       }
     }
-    return 'title';
+    return 'loading'; // Starts with the Pabna City drone shot loading page!
   });
 
+  const [leaderInputName, setLeaderInputName] = useState<string>(() => getSavedLeaderName());
+  const [loadingProgress, setLoadingProgress] = useState<number>(0);
   const [cameraMode, setCameraMode] = useState<CameraMode>('chase');
   const [paintFinish, setPaintFinish] = useState<PaintFinish>('obsidian-black');
   const [muted, setMuted] = useState<boolean>(false);
@@ -59,21 +67,61 @@ export default function App() {
     visitedCount: 1,
     sirenActive: false,
     isReversing: false,
-    playerX: -2,
-    playerZ: 135,
+    isWrongSide: false,
+    playerX: -4.5,
+    playerZ: 140,
     playerHeading: 0,
-    currency: 0,
+    currency: getStoredAccountCurrency(),
     accidentCount: 0,
     chaKhaoyarActive: false,
     lastAccidentNotice: null,
+    leaderName: getSavedLeaderName(),
   });
 
   const actionsRef = useRef<WorldControlActions | null>(null);
+
+  // Loading Screen Timer (Pabna City Drone View with Animated Banner by Md. Asif Jahan)
+  useEffect(() => {
+    if (gameState === 'loading') {
+      const interval = setInterval(() => {
+        setLoadingProgress((prev) => {
+          if (prev >= 100) {
+            clearInterval(interval);
+            const saved = typeof window !== 'undefined' ? localStorage.getItem('pabna_leader_name') : null;
+            if (!saved || saved.trim().length === 0) {
+              setGameState('leader-setup');
+            } else {
+              setGameState('title');
+            }
+            return 100;
+          }
+          return prev + 5;
+        });
+      }, 80);
+      return () => clearInterval(interval);
+    }
+  }, [gameState]);
 
   // Mirror game state to document.body.dataset.state
   useEffect(() => {
     document.body.dataset.state = gameState;
   }, [gameState]);
+
+  // Keep money stored at user's account
+  useEffect(() => {
+    if (telemetry.currency > 0) {
+      saveStoredAccountCurrency(telemetry.currency);
+    }
+  }, [telemetry.currency]);
+
+  const handleLeaderSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    const final = leaderInputName.trim() || 'নেতা মহোদয়';
+    saveLeaderName(final);
+    actionsRef.current?.updateLeaderName(final);
+    soundEngine.playClick();
+    setGameState('title');
+  };
 
   const startGame = useCallback(() => {
     document.body.dataset.state = 'playing';
@@ -129,6 +177,7 @@ export default function App() {
   }, [gameState, startGame, cycleCamera, handleToggleMute]);
 
   const currentCameraLabel = CAMERA_MODES.find((c) => c.id === cameraMode)?.label ?? 'Chase Cam';
+  const corruptionAchievement = calculateCorruptionAchievement(telemetry.currency);
 
   return (
     <main className="relative w-full h-full overflow-hidden select-none">
@@ -140,6 +189,119 @@ export default function App() {
         onTelemetryUpdate={setTelemetry}
         actionsRef={actionsRef}
       />
+
+      {/* =====================================================================
+          STATE 0: INITIAL LOADING SCREEN WITH DRONE SHOT OF PABNA CITY
+          Animated Banner: "তৈরি করেছেন- মোঃ আসিফ জাহান"
+         ===================================================================== */}
+      {gameState === 'loading' && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          className="fixed inset-0 z-50 flex flex-col justify-between p-4 sm:p-8 select-none overflow-hidden"
+          style={{
+            backgroundImage: `linear-gradient(to bottom, rgba(15, 23, 42, 0.45) 0%, rgba(15, 23, 42, 0.85) 60%, rgba(10, 15, 30, 0.98) 100%), url('https://upload.wikimedia.org/wikipedia/commons/7/77/Aerial_view_of_Hardinge_Bridge_and_Lalon_Shah_Bridge.jpg')`,
+            backgroundSize: 'cover',
+            backgroundPosition: 'center',
+          }}
+        >
+          {/* Top Drone View Header Badge */}
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-slate-950/70 backdrop-blur-md border border-amber-400/40 text-xs font-display text-amber-300">
+              <span className="animate-pulse">🔴</span>
+              <span>PABNA CITY REAL DRONE VIEW · পাকশী ও পদ্মা নদী ড্রোন শট</span>
+            </div>
+            <div className="text-xs font-mono text-slate-300 bg-slate-900/60 px-3 py-1 rounded-full backdrop-blur-md">
+              GPS: 24.0064° N, 89.2483° E (পাবনা সদর)
+            </div>
+          </div>
+
+          {/* Center Stage: Animated Banner "তৈরি করেছেন- মোঃ আসিফ জাহান" */}
+          <div className="max-w-2xl mx-auto my-auto text-center flex flex-col items-center">
+            {/* Animated Banner with Golden Glow */}
+            <div className="px-6 py-3 sm:px-8 sm:py-4 rounded-2xl bg-slate-950/85 backdrop-blur-lg border-2 border-amber-400/80 shadow-[0_0_50px_rgba(245,158,11,0.6)] animate-pulse mb-6">
+              <div className="text-xs sm:text-sm font-display uppercase tracking-widest text-amber-300 font-bold mb-1">
+                ★ গেমটির মূল পরিকল্পক ও ডেভেলপার ★
+              </div>
+              <h1 className="text-2xl sm:text-4xl md:text-5xl font-extrabold font-bengali text-white leading-tight drop-shadow-[0_4px_16px_rgba(0,0,0,0.9)]">
+                তৈরি করেছেন- <span className="text-amber-400">মোঃ আসিফ জাহান</span>
+              </h1>
+              <div className="text-xs sm:text-sm font-display text-emerald-300 font-semibold mt-1">
+                MD. ASIF JAHAN · PABNA CITY 3D PROJECT
+              </div>
+            </div>
+
+            {/* Sub-label describing Pabna city features */}
+            <p className="text-xs sm:text-sm text-slate-200 font-bengali max-w-lg mb-6 leading-relaxed bg-slate-900/60 p-3 rounded-xl backdrop-blur-sm border border-slate-700/60">
+              পাবনা জিলা স্কুল হতে শুরু করে ৪-লেন আব্দুল হামিদ রোড, রূপপুর, এডওয়ার্ড কলেজ ও সম্পূর্ণ শহরের অবিরাম ৩ডি ড্রাইভ অভিজ্ঞতা লোড হচ্ছে...
+            </p>
+
+            {/* Progress Bar */}
+            <div className="w-full max-w-md bg-slate-900/90 rounded-full h-3.5 border border-amber-400/50 p-0.5 overflow-hidden shadow-inner">
+              <div
+                className="h-full bg-gradient-to-r from-amber-400 via-amber-300 to-emerald-400 rounded-full transition-all duration-150 shadow-[0_0_15px_rgba(245,158,11,0.8)]"
+                style={{ width: `${loadingProgress}%` }}
+              />
+            </div>
+            <div className="mt-2 text-xs font-mono text-amber-300 font-bold">
+              পাবনা সিটি লোডিং... {loadingProgress}%
+            </div>
+          </div>
+
+          {/* Footer note */}
+          <div className="text-center text-[11px] text-slate-400 font-display">
+            ★ PABNA DISTRICT CIVIC PROTOCOL SIMULATION · তৈরি করেছেন- মোঃ আসিফ জাহান ★
+          </div>
+        </div>
+      )}
+
+      {/* =====================================================================
+          STATE 0.5: FIRST TIME SETUP - "নেতার নাম কি?"
+         ===================================================================== */}
+      {gameState === 'leader-setup' && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md select-none"
+        >
+          <div className="w-full max-w-md rounded-2xl bg-gradient-to-b from-slate-900 via-slate-950 to-slate-900 border-2 border-amber-400 p-6 sm:p-8 shadow-[0_0_50px_rgba(245,158,11,0.5)] text-center animate-in fade-in zoom-in duration-200">
+            <div className="w-16 h-16 mx-auto mb-3 rounded-full bg-amber-500/20 border-2 border-amber-400 flex items-center justify-center text-3xl shadow-inner">
+              👑
+            </div>
+
+            <div className="text-xs font-display uppercase tracking-widest text-amber-300 mb-1 font-bold">
+              পাবনা ভিআইপি প্রটোকল নিবন্ধন · VIP REGISTRATION
+            </div>
+
+            <h2 className="text-2xl sm:text-3xl font-extrabold font-bengali text-white mb-2 leading-tight">
+              নেতার নাম কি?
+            </h2>
+
+            <p className="text-xs sm:text-sm font-bengali text-slate-300 mb-6 leading-relaxed">
+              পাবনা শহরের আব্দুল হামিদ রোডে যে ভিআইপি গাড়িটি চলবে, সেই নেতার নাম লিখে কনভয় শুরু করুন।
+            </p>
+
+            <form onSubmit={handleLeaderSubmit} className="flex flex-col gap-4">
+              <input
+                type="text"
+                autoFocus
+                value={leaderInputName}
+                onChange={(e) => setLeaderInputName(e.target.value)}
+                placeholder="যেমন: হাজী মকবুল হোসেন / বড় ভাই"
+                className="w-full px-4 py-3.5 rounded-xl bg-slate-900 border-2 border-amber-400/80 text-white font-bengali text-lg text-center font-bold focus:outline-none focus:border-amber-300 focus:ring-2 focus:ring-amber-400/40 shadow-inner"
+              />
+
+              <button
+                type="submit"
+                className="w-full py-3.5 rounded-xl bg-gradient-to-r from-amber-400 to-amber-500 hover:from-amber-300 hover:to-amber-400 text-slate-950 font-bengali font-bold text-base shadow-[0_0_25px_rgba(251,191,36,0.5)] active:scale-95 transition cursor-pointer flex items-center justify-center gap-2"
+              >
+                <span>🚗</span>
+                <span>নাম নিশ্চিত করুন ও কনভয়ে যান</span>
+              </button>
+            </form>
+          </div>
+        </div>
+      )}
 
       {/* =====================================================================
           STATE 1: TITLE SCREEN ('title')
@@ -155,6 +317,12 @@ export default function App() {
         >
           {/* Left-third Title Lockup & Primary CTA */}
           <div className="max-w-xl my-auto pointer-events-auto">
+            {/* Creator Badge banner on title */}
+            <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-slate-900/80 border border-amber-400/60 text-xs font-bengali text-amber-300 font-bold mb-3 shadow-md backdrop-blur-sm">
+              <span>★</span>
+              <span>তৈরি করেছেন- মোঃ আসিফ জাহান (পাবনা)</span>
+            </div>
+
             {/* Bespoke Inline SVG Title Emblem */}
             <svg
               viewBox="0 0 540 195"
@@ -183,7 +351,7 @@ export default function App() {
                 fontFamily="Chakra Petch, Hind Siliguri, sans-serif"
                 letterSpacing="1.5"
               >
-                ★ PABNA ABDUL HAMID ROAD 3D ★
+                ★ PABNA 4-LANE CITY LOOP 3D ★
               </text>
 
               {/* Main Display Title */}
@@ -233,14 +401,24 @@ export default function App() {
               </text>
             </svg>
 
+            {/* Leader Name Tag */}
+            <div className="flex items-center gap-2 mb-3">
+              <span className="text-xs font-display text-slate-400">সম্মানিত নেতা:</span>
+              <span className="px-3 py-1 rounded-lg bg-amber-500/20 border border-amber-400/60 text-amber-300 font-bengali font-bold text-sm">
+                👑 {telemetry.leaderName}
+              </span>
+              <button
+                type="button"
+                onClick={() => setGameState('leader-setup')}
+                className="text-xs text-slate-400 hover:text-white underline cursor-pointer"
+              >
+                নাম পরিবর্তন
+              </button>
+            </div>
+
             <p className="text-slate-200 text-xs sm:text-sm md:text-base leading-relaxed mb-4 md:mb-6 max-w-lg font-normal hidden sm:block">
-              Experience the full 3D visual realism of Pabna City: drive down{' '}
-              <span className="text-amber-300 font-semibold">Abdul Hamid Road</span> past{' '}
-              <span className="text-white font-medium">
-                Pabna Zilla School, Shapla Chattar, Robiul Market, Ananta Cinema Hall, Bus Terminal,
-                Govt. Edward College, and Paksey Bridge Monument
-              </span>{' '}
-              with dedicated touch buttons for mobile and keyboard controls for desktop.
+              পাবনা জিলা স্কুল থেকে যাত্রা শুরু হয়ে ৪-লেন আব্দুল হামিদ রোড ও ডানে-বামের সংযোগ সড়ক ঘুরে পুনরায় জিলা স্কুলে অবিরাম লুপ হবে!
+              রাস্তার ডিভাইডারে গাছ ও ফকির রয়েছে। উল্টো সাইডে ড্রাইভ করলে ২ গুণ আয়! অর্জিত টাকা জমা থাকবে আপনার অ্যাকাউন্টে।
             </p>
 
             <div className="flex flex-wrap items-center gap-3 md:gap-4">
@@ -251,7 +429,7 @@ export default function App() {
                 className="px-6 py-3.5 md:px-8 md:py-4 rounded-xl bg-amber-400 hover:bg-amber-300 active:translate-y-0.5 text-slate-950 font-display font-bold text-sm md:text-lg tracking-wide shadow-[0_0_30px_rgba(251,191,36,0.5)] transition cursor-pointer whitespace-nowrap shrink-0 flex items-center gap-2"
               >
                 <span>🚗</span>
-                <span>START VIP RIDE · যাত্রা শুরু করুন</span>
+                <span>জিলা স্কুল হতে যাত্রা শুরু · START RIDE</span>
               </button>
 
               <button
@@ -271,7 +449,10 @@ export default function App() {
           {/* Control hints footer */}
           <div className="w-full flex items-center justify-between text-[11px] md:text-sm text-slate-300 font-display tracking-wide pt-2 md:pt-4 border-t border-slate-800/80">
             <span>
-              Controls: Touch buttons on mobile screen · WASD / Arrows on PC · Space VIP Horn · B Leader Wave · C Camera
+              কন্ট্রোল: মোবাইলে টাচ বাটন · পিসিতে WASD / Arrow Keys · Space ভিআইপি হর্ন · B নেতার হাত নাড়া · C ক্যামেরা
+            </span>
+            <span className="text-amber-400 font-bold hidden sm:inline">
+              ডেভেলপার: মোঃ আসিফ জাহান
             </span>
           </div>
         </div>
@@ -352,8 +533,13 @@ export default function App() {
                 ৳
               </div>
               <div>
-                <div className="text-[10px] md:text-[11px] font-display uppercase tracking-widest text-emerald-300 font-bold">
-                  ACTIVE BDT CURRENCY · ব্যালেন্স
+                <div className="text-[10px] md:text-[11px] font-display uppercase tracking-widest text-emerald-300 font-bold flex items-center gap-1.5">
+                  <span>{telemetry.leaderName}-এর ফান্ড</span>
+                  {telemetry.isWrongSide && (
+                    <span className="px-1.5 py-0.2 rounded bg-red-600 text-white font-bold text-[9px] animate-pulse">
+                      ২x উল্টো সাইড!
+                    </span>
+                  )}
                 </div>
                 <div className="text-xl md:text-2xl font-bold font-mono text-emerald-300 tabular-nums leading-none">
                   ৳ {telemetry.currency.toLocaleString()}
@@ -474,6 +660,11 @@ export default function App() {
               <span className="font-mono font-bold text-xs tabular-nums">
                 {telemetry.currency.toLocaleString()}
               </span>
+              {telemetry.isWrongSide && (
+                <span className="px-1 rounded bg-red-600 text-white font-bold text-[8px] animate-pulse">
+                  ২x
+                </span>
+              )}
             </div>
 
             {/* Right: Compact Icon Utility Buttons */}
@@ -982,7 +1173,8 @@ export default function App() {
       )}
 
       {/* =====================================================================
-          STREET EVENT DIALOG: "ভাই চা খাওয়ার টাকা টা যদি......."
+          STREET EVENT DIALOG: "বড় ভাই, চা খাওয়ার জন্যি কয়ডা ট্যাকা দেন না ক্যা"
+          (Authentic Pabna Regional Dialect)
          ===================================================================== */}
       {telemetry.chaKhaoyarActive && (
         <div
@@ -997,20 +1189,20 @@ export default function App() {
             </div>
 
             <div className="text-[10px] font-display uppercase tracking-widest text-amber-300 mb-0.5 font-bold">
-              পাবনা শহরের চা আড্ডা · STREET PETITION
+              পাবনা শহরের চা আড্ডা · PABNA STREET PETITION
             </div>
 
             <h2 className="text-xl sm:text-2xl font-bold font-bengali text-white mb-1.5 leading-tight">
-              “ভাই চা খাওয়ার টাকা টা যদি.......”
+              “বড় ভাই, চা খাওয়ার জন্যি কয়ডা ট্যাকা দেন না ক্যা!”
             </h2>
 
             <p className="text-xs sm:text-sm font-bengali text-amber-200/90 mb-3 leading-snug">
-              পাবনা শহরের একদল মানুষ এসে নেতার গাড়ি ঘিরে ধরে বিনীতভাবে চা খাওয়ার টাকা চেয়েছে!
+              পাবনার একদল ছাওয়াল-পাল আইসে {telemetry.leaderName}-এর গাড়ি ঘেড়াও করে কইতিছে— “বড় ভাই, চা খাওয়ার জন্যি কয়ডা ট্যাকা দেন না ক্যা!”
             </p>
 
             <div className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-red-950/80 border border-red-500/60 text-red-200 text-xs font-bengali font-bold mb-4">
               <span>💸</span>
-              <span>-১,০০০ টাকা কেটে নেওয়া হয়েছে!</span>
+              <span>-১,০০০ ট্যাকা কেটে নেওয়া হলো! (চা আর বিসকুট খরচ)</span>
             </div>
 
             <button
@@ -1021,7 +1213,7 @@ export default function App() {
               className="w-full py-2.5 sm:py-3 rounded-xl bg-gradient-to-r from-amber-400 to-amber-500 hover:from-amber-300 hover:to-amber-400 text-slate-950 font-bengali font-bold text-sm shadow-[0_0_20px_rgba(251,191,36,0.4)] active:scale-95 transition cursor-pointer flex items-center justify-center gap-2"
             >
               <span>☕</span>
-              <span>আচ্ছা নেন (দিলাম ১,০০০ টাকা)</span>
+              <span>এই নেও গ্যাদা, চা খাও (দিলেম ১,০০০ ট্যাকা)</span>
             </button>
           </div>
         </div>
@@ -1040,21 +1232,35 @@ export default function App() {
         >
           <div className="w-full max-w-sm sm:max-w-md rounded-2xl bg-slate-950/90 backdrop-blur-md border border-amber-400/40 p-4 sm:p-6 shadow-2xl">
             <div className="text-xs font-display uppercase tracking-widest text-amber-400 mb-1">
-              VIP PROTOCOL PAUSED · বিরতি
+              VIP PROTOCOL PAUSED · জিরেন নেন (বিরতি)
             </div>
-            <h2 id="pause-modal-title" className="text-xl sm:text-2xl font-bold font-bengali text-white mb-3">
-              নেতার গাড়ি · পাবনা সিটি রোড
+            <h2 id="pause-modal-title" className="text-xl sm:text-2xl font-bold font-bengali text-white mb-2">
+              নেতার গাড়ি · {telemetry.leaderName}
             </h2>
+
+            {/* Live Corruption Achievement Banner */}
+            <div className="p-3 mb-3 rounded-xl bg-amber-950/50 border border-amber-400/40 text-left">
+              <div className="flex items-center gap-2 text-xs font-bold text-amber-300 mb-1">
+                <span>{corruptionAchievement.selectedScam.icon}</span>
+                <span>বাংলাদেশ দুর্নীতি অর্জন (Satirical Record)</span>
+              </div>
+              <div className="text-xs font-bengali text-white leading-relaxed">
+                {corruptionAchievement.achievementTextBn}
+              </div>
+              <div className="text-[10px] text-amber-200/80 mt-1 font-bengali">
+                {corruptionAchievement.selectedScam.pabnaContextBn}
+              </div>
+            </div>
 
             <div className="grid grid-cols-2 gap-2 sm:gap-3 mb-3 p-2.5 sm:p-3 rounded-xl bg-emerald-950/60 border border-emerald-500/40">
               <div>
-                <div className="text-[10px] sm:text-[11px] font-display text-emerald-300">TOTAL BDT · ব্যালেন্স</div>
+                <div className="text-[10px] sm:text-[11px] font-display text-emerald-300">অ্যাকাউন্টে মোট ট্যাকা</div>
                 <div className="text-lg sm:text-xl font-mono tabular-nums font-bold text-emerald-300">
                   ৳ {telemetry.currency.toLocaleString()}
                 </div>
               </div>
               <div>
-                <div className="text-[10px] sm:text-[11px] font-display text-emerald-300">ACCIDENTS · দুর্ঘটনা</div>
+                <div className="text-[10px] sm:text-[11px] font-display text-emerald-300">মোট দুর্ঘটনা</div>
                 <div className="text-lg sm:text-xl font-mono tabular-nums font-bold text-amber-300">
                   {telemetry.accidentCount}
                 </div>
@@ -1063,19 +1269,19 @@ export default function App() {
 
             <div className="grid grid-cols-3 gap-2 sm:gap-3 mb-4 p-2.5 sm:p-3 rounded-xl bg-slate-950 border border-slate-800">
               <div>
-                <div className="text-[10px] font-display text-slate-400">DISTANCE</div>
+                <div className="text-[10px] font-display text-slate-400">দূরত্ব</div>
                 <div className="text-sm sm:text-base font-mono tabular-nums font-bold text-white">
                   {telemetry.distanceMeters}m
                 </div>
               </div>
               <div>
-                <div className="text-[10px] font-display text-slate-400">SALUTES</div>
+                <div className="text-[10px] font-display text-slate-400">সালামি</div>
                 <div className="text-sm sm:text-base font-mono tabular-nums font-bold text-amber-400">
                   {telemetry.saluteCount}
                 </div>
               </div>
               <div>
-                <div className="text-[10px] font-display text-slate-400">LANDMARKS</div>
+                <div className="text-[10px] font-display text-slate-400">দর্শনীয় স্থান</div>
                 <div className="text-sm sm:text-base font-mono tabular-nums font-bold text-emerald-400">
                   {telemetry.visitedCount}/{PABNA_LANDMARKS.length}
                 </div>
@@ -1088,7 +1294,7 @@ export default function App() {
                 onClick={() => setGameState('playing')}
                 className="w-full py-2.5 sm:py-3.5 rounded-xl bg-amber-400 hover:bg-amber-300 text-slate-950 font-display font-bold text-sm cursor-pointer shadow-lg active:scale-95 transition"
               >
-                RESUME VIP DRIVE (Esc / P)
+                আবার ড্রাইভ শুরু করুন (Esc / P)
               </button>
               <button
                 type="button"
@@ -1098,14 +1304,14 @@ export default function App() {
                 }}
                 className="w-full py-2.5 sm:py-3 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-100 font-display font-semibold text-xs sm:text-sm cursor-pointer"
               >
-                RESET TO START (ABDUL HAMID ROAD)
+                পাবনা জিলা স্কুল হতে শুরু
               </button>
               <button
                 type="button"
                 onClick={() => setGameState('title')}
                 className="w-full py-2.5 sm:py-3 rounded-xl bg-slate-800/60 hover:bg-slate-800 text-slate-300 font-display font-semibold text-xs sm:text-sm cursor-pointer"
               >
-                RETURN TO TITLE SCREEN
+                টাইটেল স্ক্রিনে যান
               </button>
             </div>
           </div>
@@ -1113,7 +1319,7 @@ export default function App() {
       )}
 
       {/* =====================================================================
-          STATE 4: SUMMARY MODAL ('gameover')
+          STATE 4: SUMMARY & CORRUPTION ACHIEVEMENTS ('gameover')
          ===================================================================== */}
       {gameState === 'gameover' && (
         <div
@@ -1123,27 +1329,47 @@ export default function App() {
           className="fixed inset-0 z-30 flex items-center justify-center p-3 sm:p-6"
           style={{ backgroundColor: 'rgba(9, 13, 22, 0.7)' }}
         >
-          <div className="w-full max-w-sm sm:max-w-md rounded-2xl bg-slate-950/90 backdrop-blur-md border border-amber-400/50 p-4 sm:p-6 shadow-2xl">
+          <div className="w-full max-w-sm sm:max-w-md rounded-2xl bg-slate-950/90 backdrop-blur-md border border-amber-400/50 p-4 sm:p-6 shadow-2xl max-h-[90vh] overflow-y-auto">
             <div className="text-xs font-display uppercase tracking-widest text-emerald-400 mb-1">
-              PABNA CITY CONVOY LOG · আনলিমিটেড রাইড
+              PABNA CITY CORRUPTION SCORECARD · ক্ষতি ও অর্জন
             </div>
             <h2 id="summary-modal-title" className="text-xl sm:text-2xl font-bold font-bengali text-white mb-1">
-              নেতার গাড়ি, ১০০০ গজ দূরে থাকুন
+              {telemetry.leaderName}-এর কনভয় খতিয়ান
             </h2>
             <p className="text-xs text-slate-300 mb-3 sm:mb-4">
-              Full 3D exploration of Pabna City across Abdul Hamid Road, Zilla School, Shapla Chattar,
-              Robiul Market, Ananta Cinema Hall, Edward College, Mental Hospital, and Paksey Bridge.
+              পাবনা জিলা স্কুল, ৪-লেন আব্দুল হামিদ রোড, রূপপুর, এডওয়ার্ড কলেজ ও পাকশী লুপ ঘুরে অর্জিত সম্পদের রিপোর্ট:
             </p>
+
+            {/* Mega Corruption Achievement Display */}
+            <div className="p-3.5 mb-3.5 rounded-xl bg-gradient-to-br from-amber-950/80 via-slate-900 to-slate-950 border-2 border-amber-400 shadow-lg text-left">
+              <div className="flex items-center gap-2 mb-1.5">
+                <span className="text-2xl">{corruptionAchievement.selectedScam.icon}</span>
+                <div>
+                  <div className="text-[10px] font-display uppercase tracking-widest text-amber-400 font-bold">
+                    জাতীয় দুর্নীতির সাথে আপনার তুলনা
+                  </div>
+                  <div className="text-sm font-bold font-bengali text-white">
+                    {corruptionAchievement.selectedScam.nameBn}
+                  </div>
+                </div>
+              </div>
+              <p className="text-xs sm:text-sm font-bengali text-amber-200 font-bold mb-2 leading-relaxed">
+                {corruptionAchievement.achievementTextBn}
+              </p>
+              <div className="text-[11px] font-bengali text-slate-300 bg-slate-900/80 p-2 rounded-lg border border-slate-700/60 leading-snug">
+                {corruptionAchievement.selectedScam.descriptionBn}
+              </div>
+            </div>
 
             <div className="grid grid-cols-2 gap-2 sm:gap-3 mb-3 p-2.5 sm:p-3 rounded-xl bg-emerald-950/60 border border-emerald-500/40">
               <div>
-                <div className="text-[10px] sm:text-[11px] font-display text-emerald-300">TOTAL BDT · সংগৃহীত টাকা</div>
+                <div className="text-[10px] sm:text-[11px] font-display text-emerald-300">অ্যাকাউন্টে জমানো ট্যাকা</div>
                 <div className="text-lg sm:text-xl font-mono tabular-nums font-bold text-emerald-300">
                   ৳ {telemetry.currency.toLocaleString()}
                 </div>
               </div>
               <div>
-                <div className="text-[10px] sm:text-[11px] font-display text-emerald-300">ACCIDENTS · মোট দুর্ঘটনা</div>
+                <div className="text-[10px] sm:text-[11px] font-display text-emerald-300">মোট দুর্ঘটনা</div>
                 <div className="text-lg sm:text-xl font-mono tabular-nums font-bold text-amber-300">
                   {telemetry.accidentCount}
                 </div>
@@ -1152,19 +1378,19 @@ export default function App() {
 
             <div className="grid grid-cols-3 gap-2 sm:gap-3 mb-4 p-2.5 sm:p-3 rounded-xl bg-slate-950 border border-slate-800">
               <div>
-                <div className="text-[10px] font-display text-slate-400">DRIVEN</div>
+                <div className="text-[10px] font-display text-slate-400">দূরত্ব</div>
                 <div className="text-sm sm:text-base font-mono tabular-nums font-bold text-white">
                   {telemetry.distanceMeters}m
                 </div>
               </div>
               <div>
-                <div className="text-[10px] font-display text-slate-400">PUBLIC SALUTES</div>
+                <div className="text-[10px] font-display text-slate-400">সালামি</div>
                 <div className="text-sm sm:text-base font-mono tabular-nums font-bold text-amber-400">
                   {telemetry.saluteCount}
                 </div>
               </div>
               <div>
-                <div className="text-[10px] font-display text-slate-400">VISITED</div>
+                <div className="text-[10px] font-display text-slate-400">স্থান পরিদর্শন</div>
                 <div className="text-sm sm:text-base font-mono tabular-nums font-bold text-emerald-400">
                   {telemetry.visitedCount}/{PABNA_LANDMARKS.length}
                 </div>
@@ -1178,7 +1404,7 @@ export default function App() {
                 onClick={() => setGameState('playing')}
                 className="w-full py-2.5 sm:py-3.5 rounded-xl bg-amber-400 hover:bg-amber-300 text-slate-950 font-display font-bold text-sm cursor-pointer shadow-lg active:scale-95 transition"
               >
-                CONTINUE UNLIMITED RIDE · চালিয়ে যান
+                আবার অবিরাম রাইডে যান · CONTINUE RIDE
               </button>
               <button
                 type="button"
@@ -1188,7 +1414,7 @@ export default function App() {
                 }}
                 className="w-full py-2.5 sm:py-3 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-display font-semibold text-xs sm:text-sm cursor-pointer"
               >
-                NEW TOUR FROM ABDUL HAMID ROAD
+                জিলা স্কুল হতে নতুন ট্যুর
               </button>
             </div>
           </div>

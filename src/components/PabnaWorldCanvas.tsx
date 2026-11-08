@@ -45,6 +45,7 @@ export interface HudTelemetry {
   visitedCount: number;
   sirenActive: boolean;
   isReversing: boolean;
+  isWrongSide: boolean;
   playerX: number;
   playerZ: number;
   playerHeading: number;
@@ -52,6 +53,7 @@ export interface HudTelemetry {
   accidentCount: number;
   chaKhaoyarActive: boolean;
   lastAccidentNotice: AccidentNotice | null;
+  leaderName: string;
 }
 
 export interface WorldControlActions {
@@ -62,6 +64,7 @@ export interface WorldControlActions {
   resetCar: () => void;
   setTouchInput: (key: keyof CarInput, active: boolean) => void;
   dismissChaKhaoyar: () => void;
+  updateLeaderName: (name: string) => void;
 }
 
 interface PabnaWorldCanvasProps {
@@ -188,10 +191,10 @@ export const PabnaWorldCanvas: React.FC<PabnaWorldCanvasProps> = ({
     scene.add(sunLight.target);
 
     // 4. Ground Terrain, Pabna Abdul Hamid Road Corridor & Cross Loop Roads
-    const grassGeo = new THREE.PlaneGeometry(900, 900);
+    const grassGeo = new THREE.PlaneGeometry(1600, 1600);
     grassGeo.rotateX(-Math.PI / 2);
     const grassMat = new THREE.MeshStandardMaterial({
-      color: 0x365314,
+      color: 0x1e3a1f, // Rich green ground
       roughness: 0.92,
       metalness: 0.02,
     });
@@ -200,7 +203,8 @@ export const PabnaWorldCanvas: React.FC<PabnaWorldCanvasProps> = ({
     grassMesh.receiveShadow = true;
     scene.add(grassMesh);
 
-    // Main Abdul Hamid Road Asphalt (16m wide, 680m long, offset y = 0.03 to avoid z-fighting)
+    // Main 4-Lane Abdul Hamid Road Asphalt (24m wide, 680m long, offset y = 0.03 to avoid z-fighting)
+    // 2 lanes northbound, 2 lanes southbound, divided by central median
     const { map: roadMap, bumpMap: roadBump } = createRoadTextures(maxAniso);
     const roadMat = new THREE.MeshStandardMaterial({
       color: 0xffffff,
@@ -211,46 +215,69 @@ export const PabnaWorldCanvas: React.FC<PabnaWorldCanvasProps> = ({
       metalness: 0.08,
     });
 
-    const mainRoadGeo = new THREE.PlaneGeometry(16, 680);
+    const mainRoadGeo = new THREE.PlaneGeometry(24, 680);
     mainRoadGeo.rotateX(-Math.PI / 2);
     const mainRoad = new THREE.Mesh(mainRoadGeo, roadMat);
     mainRoad.position.set(0, 0.03, -20);
     mainRoad.receiveShadow = true;
     scene.add(mainRoad);
 
-    // Concrete Footpaths / Sidewalks with tactile flagstones & safety hazard painted curbs
+    // Concrete Footpaths / Sidewalks (outer boundaries at x = -13.8 and x = 13.8)
     const sidewalkTex = createSidewalkTexture(maxAniso);
     const sidewalkMat = new THREE.MeshStandardMaterial({
       map: sidewalkTex,
       roughness: 0.8,
     });
-    const leftSidewalk = new THREE.Mesh(new THREE.BoxGeometry(3.4, 0.2, 680), sidewalkMat);
-    leftSidewalk.position.set(-9.7, 0.1, -20);
+    const leftSidewalk = new THREE.Mesh(new THREE.BoxGeometry(3.6, 0.2, 680), sidewalkMat);
+    leftSidewalk.position.set(-13.8, 0.1, -20);
     leftSidewalk.receiveShadow = true;
     scene.add(leftSidewalk);
 
     const rightSidewalk = leftSidewalk.clone();
-    rightSidewalk.position.x = 9.7;
+    rightSidewalk.position.x = 13.8;
     scene.add(rightSidewalk);
 
-    // Connecting East-West Cross Roads (Edward College, Paksey, Hemayetpur, Town Hall, Terminal)
+    // Middle Concrete Divider Island with soil bed (1.4m wide, 0.28m high)
+    const dividerMat = new THREE.MeshStandardMaterial({
+      color: 0x475569,
+      roughness: 0.85,
+    });
+    const soilMat = new THREE.MeshStandardMaterial({
+      color: 0x271e16,
+      roughness: 0.95,
+    });
+    const centerDivider = new THREE.Mesh(new THREE.BoxGeometry(1.4, 0.28, 680), dividerMat);
+    centerDivider.position.set(0, 0.14, -20);
+    centerDivider.receiveShadow = true;
+    scene.add(centerDivider);
+
+    const dividerSoil = new THREE.Mesh(new THREE.BoxGeometry(1.1, 0.08, 678), soilMat);
+    dividerSoil.position.set(0, 0.28, -20);
+    scene.add(dividerSoil);
+
+    // Intersecting East-West Cross Roads (connecting full city and giving options for right/left roads)
+    // 4 major intersections where vehicles can turn left/right:
+    // - North Loop (Terminal & Bypass): z = -180
+    // - Central Loop (Ananta Cinema & Robiul Market): z = -70
+    // - Civic Junction (Shapla Chattar Roundabout): z = 0
+    // - South Loop (Zilla School, Hardinge Bridge, Edward College): z = 110
     const crossRoadMat = new THREE.MeshStandardMaterial({
       color: 0xffffff,
       map: roadMap,
       roughness: 0.78,
     });
-    [-168, -70, -50, 75].forEach((cz) => {
-      const cr = new THREE.Mesh(new THREE.PlaneGeometry(280, 14), crossRoadMat);
+    [-180, -70, 0, 110].forEach((cz) => {
+      const cr = new THREE.Mesh(new THREE.PlaneGeometry(360, 20), crossRoadMat);
       cr.rotation.x = -Math.PI / 2;
       cr.position.set(0, 0.026, cz);
       scene.add(cr);
     });
 
-    // Outer East and West Ring Loop Avenues (connecting all districts)
-    [-95, 95].forEach((rx) => {
-      const loopRoad = new THREE.Mesh(new THREE.PlaneGeometry(14, 380), crossRoadMat);
+    // Outer East and West 4-Lane Ring Avenues (connecting all districts: Edward College, Hospital, Bridge, Town Hall)
+    [-100, 100].forEach((rx) => {
+      const loopRoad = new THREE.Mesh(new THREE.PlaneGeometry(20, 520), crossRoadMat);
       loopRoad.rotation.x = -Math.PI / 2;
-      loopRoad.position.set(rx, 0.027, -5);
+      loopRoad.position.set(rx, 0.027, -35);
       scene.add(loopRoad);
     });
 
@@ -362,27 +389,48 @@ export const PabnaWorldCanvas: React.FC<PabnaWorldCanvasProps> = ({
       scene.add(tg);
     });
 
-    // 8. Instanced Roadside Mango & Flaming Krishnachura Blossom Trees
-    const treeCount = 140;
-    const trunkGeo = new THREE.CylinderGeometry(0.32, 0.46, 3.2, 8);
-    trunkGeo.translate(0, 1.6, 0);
+    // 8. Instanced Trees: Roadside Mango & Flaming Krishnachura + Central Divider Trees!
+    const treeCount = 200;
+    const trunkGeo = new THREE.CylinderGeometry(0.28, 0.42, 3.0, 8);
+    trunkGeo.translate(0, 1.5, 0);
     const trunkMat = new THREE.MeshStandardMaterial({ color: 0x4a2e18, roughness: 0.92 });
     const trunkInstanced = new THREE.InstancedMesh(trunkGeo, trunkMat, treeCount);
 
-    const canopyGeo = new THREE.DodecahedronGeometry(2.6, 1);
-    canopyGeo.translate(0, 4.4, 0);
+    const canopyGeo = new THREE.DodecahedronGeometry(2.3, 1);
+    canopyGeo.translate(0, 4.0, 0);
     const canopyMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.72 });
     const canopyInstanced = new THREE.InstancedMesh(canopyGeo, canopyMat, treeCount);
 
-    const treePalette = [0x15803d, 0x166534, 0x14532d, 0xdc2626, 0xe11d48]; // Lush green & brilliant red Krishnachura flowers
+    const treePalette = [0x15803d, 0x166534, 0x14532d, 0xdc2626, 0xe11d48, 0x16a34a];
     let tIdx = 0;
-    for (let z = 195; z >= -275 && tIdx < treeCount; z -= 8) {
+
+    // A) Central 4-Lane Divider Trees (placed right down x = 0 at every 14m interval)
+    for (let z = 200; z >= -270 && tIdx < treeCount; z -= 14) {
+      const isCrossIntersection = [-180, -70, 0, 110].some((cz) => Math.abs(z - cz) < 14);
+      if (isCrossIntersection) continue;
+
+      const scale = 0.72 + ((tIdx * 19) % 25) * 0.01;
+      _dummy.position.set(0, 0.28, z);
+      _dummy.rotation.set(0, (tIdx * 1.3) % (Math.PI * 2), 0);
+      _dummy.scale.set(scale, scale * 1.1, scale);
+      _dummy.updateMatrix();
+
+      trunkInstanced.setMatrixAt(tIdx, _dummy.matrix);
+      canopyInstanced.setMatrixAt(tIdx, _dummy.matrix);
+
+      _color.setHex(treePalette[tIdx % treePalette.length]);
+      canopyInstanced.setColorAt(tIdx, _color);
+      tIdx++;
+    }
+
+    // B) Outer Roadside Trees
+    for (let z = 195; z >= -275 && tIdx < treeCount; z -= 10) {
       const nearLandmark = PABNA_LANDMARKS.some(
         (l) => l.type !== 'road-arch' && Math.abs(z - l.z) < 18
       );
       if (nearLandmark) continue;
 
-      [-14.5, 14.5].forEach((sideX) => {
+      [-18.5, 18.5].forEach((sideX) => {
         if (tIdx >= treeCount) return;
         const scale = 0.85 + ((tIdx * 17) % 35) * 0.014;
         const jitterZ = ((tIdx * 13) % 5) - 2;
@@ -581,6 +629,10 @@ export const PabnaWorldCanvas: React.FC<PabnaWorldCanvasProps> = ({
       soundEngine.playClick();
     };
 
+    const updateLeaderName = (name: string) => {
+      playerState.leaderName = name;
+    };
+
     actionsRef.current = {
       triggerHorn: triggerHornAction,
       triggerWave: triggerWaveAction,
@@ -591,6 +643,7 @@ export const PabnaWorldCanvas: React.FC<PabnaWorldCanvasProps> = ({
         touchInput[key] = active;
       },
       dismissChaKhaoyar,
+      updateLeaderName,
     };
 
     const onKeyDown = (e: KeyboardEvent) => {
@@ -738,12 +791,13 @@ export const PabnaWorldCanvas: React.FC<PabnaWorldCanvasProps> = ({
         pedestriansState = pedStep.pedestrians;
         if (pedStep.accidents.length > 0) {
           for (const acc of pedStep.accidents) {
-            playerState.currency += acc.reward; // +1,000 Tk
+            playerState.currency += acc.reward;
             playerState.accidentCount += 1;
             playerState.lastAccidentNotice = {
               textBn: acc.labelBn,
               amount: acc.reward,
               timestamp: Date.now(),
+              isWrongSide: playerState.isWrongSide,
             };
             soundEngine.playCrashSound();
             soundEngine.playCashSound();
@@ -760,12 +814,13 @@ export const PabnaWorldCanvas: React.FC<PabnaWorldCanvasProps> = ({
         }
         if (trafficStep.accidents.length > 0) {
           for (const acc of trafficStep.accidents) {
-            playerState.currency += acc.reward; // +5,000 to +50,000 Tk based on vehicle size!
+            playerState.currency += acc.reward;
             playerState.accidentCount += 1;
             playerState.lastAccidentNotice = {
               textBn: acc.labelBn,
               amount: acc.reward,
               timestamp: Date.now(),
+              isWrongSide: playerState.isWrongSide,
             };
             soundEngine.playCrashSound();
             soundEngine.playCashSound();
@@ -992,6 +1047,7 @@ export const PabnaWorldCanvas: React.FC<PabnaWorldCanvasProps> = ({
           visitedCount: playerState.visitedLandmarks.length,
           sirenActive: playerState.sirenActive,
           isReversing: playerState.speed < -0.5,
+          isWrongSide: playerState.isWrongSide,
           playerX: Math.round(playerState.x),
           playerZ: Math.round(playerState.z),
           playerHeading: playerState.heading,
@@ -999,6 +1055,7 @@ export const PabnaWorldCanvas: React.FC<PabnaWorldCanvasProps> = ({
           accidentCount: playerState.accidentCount,
           chaKhaoyarActive: playerState.chaKhaoyarActive,
           lastAccidentNotice: playerState.lastAccidentNotice,
+          leaderName: playerState.leaderName,
         });
       }
 
