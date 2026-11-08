@@ -870,21 +870,23 @@ export const PabnaWorldCanvas: React.FC<PabnaWorldCanvasProps> = ({
         petalInstanced.instanceMatrix.needsUpdate = true;
       }
 
-      // Camera Choreography with Exponential Damping
+      // Camera Choreography with Exponential Damping & Portrait/Mobile Responsive Framing
       const sinH = Math.sin(playerState.heading);
       const cosH = Math.cos(playerState.heading);
+      const isPortrait = camera.aspect < 1.0;
 
       if (currentState === 'title') {
         // Title Screen Stage: Live World Showcase framing the back & side of the Leader's VIP SUV
         // so "নেতার গাড়ি, ১০০০ গজ দূরে থাকুন" and Abdul Hamid Road are prominently visible!
         const sway = Math.sin(elapsed * 0.45) * 1.4;
+        const distBackTitle = isPortrait ? 7.6 : 5.6;
         _desiredCamPos.set(
-          playerState.x + 1.65 + sway * 0.35,
-          2.05,
-          playerState.z + 5.6
+          playerState.x + (isPortrait ? 0.3 : 1.65) + sway * 0.35,
+          isPortrait ? 2.6 : 2.05,
+          playerState.z + distBackTitle
         );
         _desiredLookAt.set(
-          playerState.x - 0.8,
+          playerState.x - 0.4,
           1.45,
           playerState.z - 6.0
         );
@@ -892,15 +894,14 @@ export const PabnaWorldCanvas: React.FC<PabnaWorldCanvasProps> = ({
         const mode = cameraModeRef.current;
         if (mode === 'rear-closeup') {
           // Close-up framing the rear signboard "নেতার গাড়ি, ১০০০ গজ দূরে থাকুন" & Leader in sunroof
-          // Look slightly lower so the car shifts upward into the upper-middle of the viewport above the dock
           _desiredCamPos.set(
-            playerState.x + sinH * 4.2,
-            1.52,
-            playerState.z + cosH * 4.2
+            playerState.x + sinH * (isPortrait ? 4.9 : 4.2),
+            isPortrait ? 1.85 : 1.52,
+            playerState.z + cosH * (isPortrait ? 4.9 : 4.2)
           );
           _desiredLookAt.set(
             playerState.x - sinH * 4.0,
-            1.12,
+            isPortrait ? 1.4 : 1.12,
             playerState.z - cosH * 4.0
           );
         } else if (mode === 'leader-pov') {
@@ -928,18 +929,19 @@ export const PabnaWorldCanvas: React.FC<PabnaWorldCanvasProps> = ({
             playerState.z - cosH * 14
           );
         } else {
-          // Default 'chase' camera: shows both the rear signboard ("নেতার গাড়ি, ১০০০ গজ দূরে থাকুন")
-          // and the open road ahead, elevated cleanly above the bottom HUD bar!
+          // Default 'chase' camera: elevated cleanly so vehicle and road are high above mobile controls
           const speedPullback = Math.min(1.5, Math.abs(playerState.speed) * 0.032);
-          const distBack = 6.1 + speedPullback;
+          const distBack = (isPortrait ? 7.6 : 6.1) + speedPullback;
+          const camHeight = isPortrait ? 3.1 : 2.35;
+          const lookAtHeight = isPortrait ? 1.5 : 1.05;
           _desiredCamPos.set(
             playerState.x + sinH * distBack,
-            2.35,
+            camHeight,
             playerState.z + cosH * distBack
           );
           _desiredLookAt.set(
             playerState.x - sinH * 12,
-            1.05,
+            lookAtHeight,
             playerState.z - cosH * 12
           );
         }
@@ -963,8 +965,9 @@ export const PabnaWorldCanvas: React.FC<PabnaWorldCanvasProps> = ({
       }
       camera.lookAt(_currentLookAt);
 
-      // Dynamic FOV kick with speed
-      const targetFov = 56 + Math.min(10, Math.abs(playerState.speed) * 0.22);
+      // Dynamic FOV kick with speed (higher base FOV on portrait/mobile to avoid claustrophobic view)
+      const baseFov = isPortrait ? 68 : 56;
+      const targetFov = baseFov + Math.min(10, Math.abs(playerState.speed) * 0.22);
       if (Math.abs(camera.fov - targetFov) > 0.1) {
         camera.fov += (targetFov - camera.fov) * (1 - Math.exp(-6 * dt));
         camera.updateProjectionMatrix();
